@@ -1129,22 +1129,32 @@
     </section>
 
     <section class="chapter reveal" id="datenschutz">
-      <div>
+            <div>
         <h2>Datenschutz zuerst</h2>
         <p>
-          Für den jährlichen Ostereiermarkt in Wangen ist Datenschutz ein Kernpunkt:
-          Die Auswertung soll lokal auf dem Raspberry Pi laufen, ohne Cloud-Upload
-          und ohne Personalisierung. Aus einer erkannten Person wird kein Name und
-          kein Profil, sondern nur ein Zählereignis. Konzeptziel ist eine Verarbeitung,
-          die wie ein Hash funktioniert: nutzbar zum Zählen, aber nicht sinnvoll
-          zurückrechenbar zu einer identifizierbaren Person.
+          Der KI-Personenzähler speichert keine Fotos, Videos oder Klarnamen von Personen.
+          Erkannte Personen werden nicht als Bild gespeichert, sondern nur als nicht rückrechenbare
+          technische Kennung bzw. als Hashwert im Arbeitsspeicher verarbeitet. Aus diesem Hashwert
+          kann die ursprüngliche Person nicht wiederhergestellt werden.
+        </p>
+        <p>
+          Die Verarbeitung erfolgt ausschließlich temporär im Speicher der Kamera bzw. des Systems.
+          Die Werte werden nicht persistent gespeichert, also nicht dauerhaft auf einer Festplatte,
+          SSD, SD-Karte, Datenbank oder in der Cloud abgelegt. Wird die Kamera bzw. das System
+          ausgeschaltet oder neu gestartet, werden alle temporären Werte gelöscht.
+        </p>
+        <p>
+          Der KI-Personenzähler verarbeitet somit keine dauerhaft identifizierenden Personendaten.
+          Er nutzt temporäre technische Kennungen ausschließlich dazu, Personen zu zählen und
+          Mehrfachzählungen während des laufenden Betriebs zu vermeiden. Nach dem Ausschalten des
+          Systems sind diese Kennungen gelöscht. Dauerhaft verfügbar bleiben nur aggregierte
+          Zählwerte, sofern diese separat ausgegeben oder gespeichert werden.
         </p>
       </div>
       <div class="privacy-visual">
         <div class="privacy-flow">
           <div class="privacy-card">
             <div>
-              <div class="egg"></div>
               <strong>lokales Bildsignal</strong>
               <small>nur zur Erkennung im System</small>
             </div>
