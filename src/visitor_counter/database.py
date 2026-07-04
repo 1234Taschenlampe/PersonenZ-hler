@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
+import threading
 from time import time
 
 from .types import ConsensusDecision, Direction
@@ -18,13 +19,15 @@ class EventDatabase:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA foreign_keys=ON")
         self._migrate()
 
     def close(self) -> None:
-        self._connection.close()
+        with self._lock:
+            self._connection.close()
 
     def _migrate(self) -> None:
         with self._connection:
@@ -132,6 +135,29 @@ class EventDatabase:
                 )
                 """
             )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS global_counts (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    entered INTEGER NOT NULL DEFAULT 0,
+                    exited INTEGER NOT NULL DEFAULT 0,
+                    inside INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            self._connection.execute(
+                "INSERT OR IGNORE INTO global_counts (id, entered, exited, inside) VALUES (1, 0, 0, 0)"
+            )
+            # Pre-populate global_counts table if empty
+            row_cnt = self._connection.execute("SELECT entered, exited, inside FROM global_counts WHERE id = 1").fetchone()
+            if row_cnt == (0, 0, 0):
+                inside_cnt = self._connection.execute("SELECT COUNT(*) FROM presence_sessions WHERE status = 'inside'").fetchone()[0]
+                entered_cnt = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE counted = 1 AND uncertain = 0 AND direction = 'in'").fetchone()[0]
+                exited_cnt = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE counted = 1 AND uncertain = 0 AND direction = 'out'").fetchone()[0]
+                self._connection.execute(
+                    "UPDATE global_counts SET entered = ?, exited = ?, inside = ? WHERE id = 1",
+                    (entered_cnt, exited_cnt, inside_cnt)
+                )
             self._connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_open ON presence_sessions(global_person_id, status)")
             self._connection.execute("CREATE INDEX IF NOT EXISTS idx_events_global ON counting_events(global_person_id, timestamp)")
             self._connection.execute(
@@ -148,120 +174,150 @@ class EventDatabase:
             self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def record_decision(self, decision: ConsensusDecision, model_name: str, processing_ms: float | None = None) -> int:
-        event = decision.event
-        with self._connection:
-            cursor = self._connection.execute(
-                """
-                INSERT OR IGNORE INTO counting_events (
-                    timestamp, camera_id, local_track_id, global_person_id, session_id, passage_id,
-                    direction, event_type, counted, uncertain, consensus_reason, confidence, model_name, processing_ms, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event.timestamp,
-                    event.camera_id,
-                    event.local_track_id,
-                    event.global_person_id,
-                    event.session_id,
-                    event.passage_id,
-                    event.direction.value,
-                    "uncertain" if decision.uncertain else "crossing",
-                    int(decision.counted),
-                    int(decision.uncertain),
-                    decision.reason,
-                    event.confidence,
-                    model_name,
-                    processing_ms,
-                    time(),
-                ),
-            )
-            if cursor.rowcount == 0:
-                self.record_diagnostic("info", "duplicate_passage_event", "Duplicate passage event suppressed", event.global_person_id, event.session_id)
-                return 0
-            event_id = int(cursor.lastrowid)
-            self._upsert_person(event.global_person_id, event.timestamp)
-            if decision.counted and not decision.uncertain and event.global_person_id is not None:
-                if event.direction is Direction.IN:
-                    if not self._open_session(event.global_person_id, event.timestamp, event.camera_id, event_id, event.confidence):
-                        self._connection.execute("UPDATE counting_events SET counted = 0, event_type = 'duplicate_entry' WHERE id = ?", (event_id,))
-                elif event.direction is Direction.OUT:
-                    if not self._close_session(event.global_person_id, event.timestamp, event.camera_id, event_id, "camera_exit"):
-                        self._connection.execute("UPDATE counting_events SET counted = 0, event_type = 'orphan_exit' WHERE id = ?", (event_id,))
-            elif decision.uncertain:
-                self.record_diagnostic("warning", "uncertain_event", decision.reason, event.global_person_id, event.session_id)
-        return event_id
+        with self._lock:
+            event = decision.event
+            with self._connection:
+                cursor = self._connection.execute(
+                    """
+                    INSERT OR IGNORE INTO counting_events (
+                        timestamp, camera_id, local_track_id, global_person_id, session_id, passage_id,
+                        direction, event_type, counted, uncertain, consensus_reason, confidence, model_name, processing_ms, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.timestamp,
+                        event.camera_id,
+                        event.local_track_id,
+                        event.global_person_id,
+                        event.session_id,
+                        event.passage_id,
+                        event.direction.value,
+                        "uncertain" if decision.uncertain else "crossing",
+                        int(decision.counted),
+                        int(decision.uncertain),
+                        decision.reason,
+                        event.confidence,
+                        model_name,
+                        processing_ms,
+                        time(),
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    self.record_diagnostic("info", "duplicate_passage_event", "Duplicate passage event suppressed", event.global_person_id, event.session_id)
+                    return 0
+                event_id = int(cursor.lastrowid)
+                self._upsert_person(event.global_person_id, event.timestamp)
+                if decision.counted and not decision.uncertain and event.global_person_id is not None:
+                    if event.direction == Direction.IN:
+                        if self._open_session(event.global_person_id, event.timestamp, event.camera_id, event_id, event.confidence):
+                            self._connection.execute(
+                                "UPDATE global_counts SET entered = entered + 1, inside = inside + 1 WHERE id = 1"
+                            )
+                        else:
+                            self._connection.execute("UPDATE counting_events SET counted = 0, event_type = 'duplicate_entry' WHERE id = ?", (event_id,))
+                    elif event.direction == Direction.OUT:
+                        if self._close_session(event.global_person_id, event.timestamp, event.camera_id, event_id, "camera_exit"):
+                            self._connection.execute(
+                                "UPDATE global_counts SET exited = exited + 1, inside = CASE WHEN inside > 0 THEN inside - 1 ELSE 0 END WHERE id = 1"
+                            )
+                        else:
+                            self._connection.execute("UPDATE counting_events SET counted = 0, event_type = 'orphan_exit' WHERE id = ?", (event_id,))
+                elif decision.uncertain:
+                    self.record_diagnostic("warning", "uncertain_event", decision.reason, event.global_person_id, event.session_id)
+            return event_id
 
     def record_diagnostic(self, severity: str, code: str, message: str, global_person_id: int | None = None, session_id: int | None = None) -> None:
-        self._connection.execute(
-            """
-            INSERT INTO diagnostic_events(timestamp, severity, code, message, global_person_id, session_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (time(), severity, code, message, global_person_id, session_id),
-        )
+        with self._lock:
+            self._connection.execute(
+                """
+                INSERT INTO diagnostic_events(timestamp, severity, code, message, global_person_id, session_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (time(), severity, code, message, global_person_id, session_id),
+            )
 
     def restore_counts(self) -> dict[str, int]:
-        row = self._connection.execute("SELECT COUNT(*) FROM presence_sessions WHERE status = 'inside'").fetchone()
-        entered = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE counted = 1 AND uncertain = 0 AND direction = 'in'").fetchone()
-        exited = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE counted = 1 AND uncertain = 0 AND direction = 'out'").fetchone()
-        timeouts = self._connection.execute("SELECT COUNT(*) FROM timeout_events").fetchone()
-        uncertain = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE uncertain = 1").fetchone()
-        suppressed = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE counted = 0").fetchone()
-        return {
-            "inside": int(row[0]),
-            "entered": int(entered[0]),
-            "exited": int(exited[0]),
-            "timeouts": int(timeouts[0]),
-            "uncertain": int(uncertain[0]),
-            "suppressed": int(suppressed[0]),
-        }
+        with self._lock:
+            row = self._connection.execute("SELECT entered, exited, inside FROM global_counts WHERE id = 1").fetchone()
+            if not row:
+                self._connection.execute("INSERT OR IGNORE INTO global_counts (id, entered, exited, inside) VALUES (1, 0, 0, 0)")
+                row = (0, 0, 0)
+            entered, exited, inside = row
+            timeouts = self._connection.execute("SELECT COUNT(*) FROM timeout_events").fetchone()
+            uncertain = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE uncertain = 1").fetchone()
+            suppressed = self._connection.execute("SELECT COUNT(*) FROM counting_events WHERE counted = 0").fetchone()
+            return {
+                "inside": inside,
+                "entered": entered,
+                "exited": exited,
+                "timeouts": int(timeouts[0]),
+                "uncertain": int(uncertain[0]),
+                "suppressed": int(suppressed[0]),
+            }
+
+    def reset_global_counts(self) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute("UPDATE global_counts SET entered = 0, exited = 0, inside = 0 WHERE id = 1")
+                self._connection.execute("DELETE FROM presence_sessions")
+                self._connection.execute("DELETE FROM counting_events")
+                self._connection.execute("DELETE FROM timeout_events")
 
     def update_last_seen(self, global_person_ids: set[int], timestamp: float) -> None:
-        with self._connection:
-            for global_person_id in global_person_ids:
-                self._upsert_person(global_person_id, timestamp)
-                self._connection.execute(
-                    "UPDATE presence_sessions SET last_seen_time = ?, updated_at = ? WHERE global_person_id = ? AND status = 'inside'",
-                    (timestamp, time(), global_person_id),
-                )
+        with self._lock:
+            with self._connection:
+                for global_person_id in global_person_ids:
+                    self._upsert_person(global_person_id, timestamp)
+                    self._connection.execute(
+                        "UPDATE presence_sessions SET last_seen_time = ?, updated_at = ? WHERE global_person_id = ? AND status = 'inside'",
+                        (timestamp, time(), global_person_id),
+                    )
 
     def close_timed_out_sessions(self, timeout_minutes: int, now: float | None = None) -> TimeoutResult:
-        now = time() if now is None else now
-        cutoff = now - (timeout_minutes * 60)
-        closed = 0
-        last_timeout_at: float | None = None
-        with self._connection:
-            rows = self._connection.execute(
-                """
-                SELECT session_id, global_person_id FROM presence_sessions
-                WHERE status = 'inside' AND COALESCE(last_seen_time, entry_time, created_at) < ?
-                """,
-                (cutoff,),
-            ).fetchall()
-            for session_id, global_person_id in rows:
-                exists = self._connection.execute("SELECT 1 FROM timeout_events WHERE session_id = ?", (session_id,)).fetchone()
-                if exists:
-                    continue
-                self._connection.execute(
-                    "UPDATE presence_sessions SET status = 'timeout', exit_time = ?, exit_reason = 'inactivity_timeout', updated_at = ? WHERE session_id = ? AND status = 'inside'",
-                    (now, now, session_id),
-                )
-                if self._connection.total_changes:
+        with self._lock:
+            now = time() if now is None else now
+            cutoff = now - (timeout_minutes * 60)
+            closed = 0
+            last_timeout_at: float | None = None
+            with self._connection:
+                rows = self._connection.execute(
+                    """
+                    SELECT session_id, global_person_id FROM presence_sessions
+                    WHERE status = 'inside' AND COALESCE(last_seen_time, entry_time, created_at) < ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                for session_id, global_person_id in rows:
+                    exists = self._connection.execute("SELECT 1 FROM timeout_events WHERE session_id = ?", (session_id,)).fetchone()
+                    if exists:
+                        continue
                     self._connection.execute(
-                        "INSERT OR IGNORE INTO timeout_events(session_id, global_person_id, timeout_at, timeout_minutes, created_at) VALUES (?, ?, ?, ?, ?)",
-                        (session_id, global_person_id, now, timeout_minutes, now),
+                        "UPDATE presence_sessions SET status = 'timeout', exit_time = ?, exit_reason = 'inactivity_timeout', updated_at = ? WHERE session_id = ? AND status = 'inside'",
+                        (now, now, session_id),
                     )
-                    self.record_diagnostic("info", "presence_timeout", "Session closed by inactivity timeout", global_person_id, session_id)
-                    closed += 1
-                    last_timeout_at = now
-        return TimeoutResult(closed, last_timeout_at)
+                    if self._connection.total_changes:
+                        self._connection.execute(
+                            "INSERT OR IGNORE INTO timeout_events(session_id, global_person_id, timeout_at, timeout_minutes, created_at) VALUES (?, ?, ?, ?, ?)",
+                            (session_id, global_person_id, now, timeout_minutes, now),
+                        )
+                        self.record_diagnostic("info", "presence_timeout", "Session closed by inactivity timeout", global_person_id, session_id)
+                        closed += 1
+                        last_timeout_at = now
+                if closed > 0:
+                    self._connection.execute(
+                        "UPDATE global_counts SET inside = CASE WHEN inside >= ? THEN inside - ? ELSE 0 END WHERE id = 1",
+                        (closed, closed),
+                    )
+            return TimeoutResult(closed, last_timeout_at)
 
     def event_count(self) -> int:
-        row = self._connection.execute("SELECT COUNT(*) FROM counting_events").fetchone()
-        return int(row[0])
+        with self._lock:
+            row = self._connection.execute("SELECT COUNT(*) FROM counting_events").fetchone()
+            return int(row[0])
 
     def table_names(self) -> list[str]:
-        return [row[0] for row in self._connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+        with self._lock:
+            return [row[0] for row in self._connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
 
     def _upsert_person(self, global_person_id: int | None, timestamp: float) -> None:
         if global_person_id is None:

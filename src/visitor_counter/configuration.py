@@ -25,6 +25,8 @@ class CameraConfig:
     entry_zone: str = "near"
     exit_zone: str = "far"
     masks: list[list[tuple[int, int]]] = field(default_factory=list)
+    entry_direction: str = "A_to_B"  # "A_to_B", "B_to_A", or "none"
+    exit_direction: str = "B_to_A"   # "A_to_B", "B_to_A", or "none"
 
 
 @dataclass
@@ -35,16 +37,12 @@ class ModelConfig:
     target_hef_path: str = "models/yolo26m_detection_hailo10h_640.hef"
     custom_target_model_name: str = "YOLO26m COCO Detection HAILO10H (person filter)"
     custom_target_hef_path: str = "models/yolo26m_detection_hailo10h_640.hef"
-    require_custom_yolo26x: bool = True
+    require_custom_yolo26m: bool = True
     detector_fallback_enabled: bool = False
     active_detector_policy: str = "Only the official YOLO26m COCO HAILO10H detection HEF may run; inference filters COCO class 0 person and missing or invalid HEF disables detection and counting."
     detector_candidates: list[dict[str, str]] = field(
         default_factory=lambda: [
             {"name": "YOLO26m COCO Detection HAILO10H (person filter)", "path": "models/yolo26m_detection_hailo10h_640.hef", "role": "required_runtime"},
-            {"name": "YOLO26x COCO Detection HAILO10H (person filter)", "path": "models/yolo26x_person_hailo10h_640.hef", "role": "not_available_for_hailo10h"},
-            {"name": "YOLO11x Detection HAILO10H", "path": "models/yolo11x_hailo10h.hef", "role": "manual_rollback_only"},
-            {"name": "YOLO11l Detection HAILO10H", "path": "models/yolo11l_hailo10h.hef", "role": "comparison_only"},
-            {"name": "YOLO26m Pose HAILO10H", "path": "models/yolo26m_pose_hailo10h_640.hef", "role": "forbidden_detector"},
         ]
     )
     reid_model_name: str = "OSNet x1.0 HAILO10H"
@@ -68,6 +66,15 @@ class TrackingConfig:
     min_hits_before_counting: int = 5
     min_confirmed_hits: int = 5
     iou_match_threshold: float = 0.20
+    
+    # Robust crossing parameters
+    min_confirmed_track_hits: int = 5
+    min_stable_zone_frames: int = 3
+    count_cooldown_seconds: float = 2.0
+    minimum_confidence: float = 0.35
+    zone_hysteresis_pixels: float = 25.0
+    maximum_track_age: int = 30
+    minimum_bbox_area: float = 1000.0
 
 
 @dataclass
@@ -204,7 +211,7 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Pose HEFs must never be used as detection models.")
     if config.model.allow_fallback or config.model.detector_fallback_enabled:
         errors.append("Model fallback must be disabled for production YOLO26 operation.")
-    if not config.model.require_custom_yolo26x:
+    if not config.model.require_custom_yolo26m:
         errors.append("Production runtime must require the approved YOLO26 HEF.")
     if not config.model.reid_required:
         errors.append("Production runtime must require OSNet ReID HEF.")

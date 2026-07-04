@@ -61,8 +61,8 @@ class ProcessingPipeline(Thread):
             camera_id: LineCrossingCounter(
                 camera_id,
                 CountingLine(camera.line_start, camera.line_end, camera.in_positive_side),
-                config.tracking.min_hits_before_counting,
-                camera.role,
+                config.tracking,
+                camera,
             )
             for camera_id, camera in config.cameras.items()
         }
@@ -149,9 +149,23 @@ class ProcessingPipeline(Thread):
                 decision = self.consensus.decide(event)
                 if event.global_person_id is None:
                     decision = ConsensusDecision(event, False, decision.duplicate_of, True, "missing global person id")
+                
+                prev_inside = self.global_counts.inside
                 self.global_counts.apply(event.direction, decision.counted, decision.uncertain)
-                self.database.record_decision(decision, self.config.model.model_name, self.runtime_stats.total_latency_ms)
+                event_id = self.database.record_decision(decision, self.config.model.model_name, self.runtime_stats.total_latency_ms)
                 self._restore_inside_only()
+                new_inside = self.global_counts.inside
+                
+                camera_num = 1 if packet.camera_id == "camera_1" else 2
+                if decision.counted and not decision.uncertain:
+                    LOGGER.info("COUNT_EVENT event_id=%s camera=%s track_id=%s direction=%s previous_global_inside=%s new_global_inside=%s",
+                                event_id, camera_num, event.local_track_id, event.direction.value, prev_inside, new_inside)
+                else:
+                    reason = decision.reason or "suppressed_or_uncertain"
+                    LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=%s", camera_num, event.local_track_id, reason)
+                
+                LOGGER.info("GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
+                            self.global_counts.inside, self.global_counts.entered, self.global_counts.exited)
             draw_start = monotonic()
             annotated = self._annotate(packet, tracks)
             stage_ms["draw_boxes_ms"] = (monotonic() - draw_start) * 1000.0
@@ -223,6 +237,7 @@ class ProcessingPipeline(Thread):
             counter.reset()
         self.consensus.reset()
         self.identity.reset()
+        self.database.reset_global_counts()
         self.global_counts = GlobalCounts()
 
     def _restore_counts(self) -> None:
@@ -272,6 +287,13 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.hailo_inference_count = self.hailo.inference_count
             if detections:
                 self.runtime_stats.last_detection_at = monotonic()
+            
+            # Log DETECTION event
+            camera_num = 1 if packet.camera_id == "camera_1" else 2
+            for det in detections:
+                LOGGER.info("DETECTION camera=%s frame=%s class_id=0 confidence=%.2f bbox=%s",
+                            camera_num, packet.frame_id, det.confidence, 
+                            (int(det.bbox.x1), int(det.bbox.y1), int(det.bbox.x2), int(det.bbox.y2)))
             return detections
         except HailoUnavailableError as exc:
             self.runtime_stats.hailo_status = str(exc)
@@ -287,16 +309,47 @@ class ProcessingPipeline(Thread):
         cv2.putText(image, role_text, (18, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(image, event_text, (18, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.line(image, camera_config.line_start, camera_config.line_end, (0, 220, 255), 2)
+        
+        # Draw Zone A and Zone B boundary lines based on normal vector and hysteresis
+        ax, ay = camera_config.line_start
+        bx, by = camera_config.line_end
+        line_length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+        if line_length > 0:
+            nx = -(by - ay) / line_length
+            ny = (bx - ax) / line_length
+            d = self.config.tracking.zone_hysteresis_pixels
+            
+            # Boundary A (distance < -d)
+            ax_a = int(ax + nx * (-d))
+            ay_a = int(ay + ny * (-d))
+            bx_a = int(bx + nx * (-d))
+            by_a = int(by + ny * (-d))
+            cv2.line(image, (ax_a, ay_a), (bx_a, by_a), (0, 0, 255), 1, cv2.LINE_AA)
+            
+            # Boundary B (distance > d)
+            ax_b = int(ax + nx * d)
+            ay_b = int(ay + ny * d)
+            bx_b = int(bx + nx * d)
+            by_b = int(by + ny * d)
+            cv2.line(image, (ax_b, ay_b), (bx_b, by_b), (0, 255, 0), 1, cv2.LINE_AA)
+
         for track in tracks:
             box = track.bbox
             cv2.rectangle(image, (int(box.x1), int(box.y1)), (int(box.x2), int(box.y2)), (0, 255, 120), 2)
-            label = f"L{track.track_id} G{track.global_person_id or '?'} {track.confidence:.2f}"
+            
+            counter = self.counters[packet.camera_id]
+            memory = counter._tracks.get(track.track_id)
+            zone_text = memory.stable_zone if memory else "neutral"
+            counted_text = "ja" if (memory and memory.counted) else "nein"
+            dir_text = "IN" if camera_config.role == "entrance" else "OUT"
+            
+            label = f"ID:{track.track_id} Z:{zone_text} R:{dir_text} C:{counted_text}"
             cv2.putText(
                 image,
                 label,
                 (int(box.x1), max(0, int(box.y1) - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
+                0.5,
                 (0, 255, 120),
                 2,
                 cv2.LINE_AA,
@@ -306,3 +359,10 @@ class ProcessingPipeline(Thread):
     def _emit_stats(self) -> None:
         if self.stats_callback:
             self.stats_callback(self.runtime_stats, self.global_counts)
+            
+            # Log GUI_COUNTER_UPDATE periodically (once per second)
+            now = monotonic()
+            if not hasattr(self, "_last_gui_log_time") or now - self._last_gui_log_time >= 1.0:
+                LOGGER.info("GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
+                            self.global_counts.inside, self.global_counts.entered, self.global_counts.exited)
+                self._last_gui_log_time = now

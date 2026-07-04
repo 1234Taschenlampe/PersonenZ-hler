@@ -17,6 +17,8 @@ cameras:
     entry_zone: near
     exit_zone: far
     masks: []
+    entry_direction: A_to_B
+    exit_direction: B_to_A
   camera_2:
     camera_id: camera_2
     device: /dev/video2
@@ -35,6 +37,8 @@ cameras:
     entry_zone: near
     exit_zone: far
     masks: []
+    entry_direction: none
+    exit_direction: B_to_A
 model:
   hef_path: models/yolo26m_detection_hailo10h_640.hef
   model_name: YOLO26m COCO Detection HAILO10H (person filter)
@@ -44,18 +48,6 @@ model:
   - name: YOLO26m COCO Detection HAILO10H (person filter)
     path: models/yolo26m_detection_hailo10h_640.hef
     role: required_runtime
-  - name: YOLO26x COCO Detection HAILO10H (person filter)
-    path: models/yolo26x_person_hailo10h_640.hef
-    role: not_available_for_hailo10h
-  - name: YOLO11x Detection HAILO10H
-    path: models/yolo11x_hailo10h.hef
-    role: manual_rollback_only
-  - name: YOLO11l Detection HAILO10H
-    path: models/yolo11l_hailo10h.hef
-    role: comparison_only
-  - name: YOLO11m Detection HAILO10H
-    path: models/yolov11m_h10.hef
-    role: forbidden_fallback
   reid_model_name: OSNet x1.0 HAILO10H
   reid_hef_path: models/osnet_x1_0_hailo10h.hef
   reid_required: true
@@ -68,7 +60,7 @@ model:
   iou_threshold: 0.6
   max_detections: 300
   allow_fallback: false
-  require_custom_yolo26x: true
+  require_custom_yolo26m: true
   detector_fallback_enabled: false
   custom_target_model_name: YOLO26m COCO Detection HAILO10H (person filter)
   custom_target_hef_path: models/yolo26m_detection_hailo10h_640.hef

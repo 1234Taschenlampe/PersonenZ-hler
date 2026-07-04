@@ -136,7 +136,7 @@ class MainWindow(QMainWindow):
         self.config_path = project_root / "config" / "config.yaml"
         self.config = load_config(self.config_path)
         configure_logging(project_root / "logs")
-        self.setWindowTitle("YOLO26x Dual-Kamera Besucherzaehler")
+        self.setWindowTitle("YOLO26m Dual-Kamera Besucherzaehler")
         self.resize(1500, 900)
         self.frame_queue = LatestFrameHub(list(self.config.cameras))
         self.stop_event = Event()
@@ -237,6 +237,7 @@ class MainWindow(QMainWindow):
             "camera_2",
             "camera_fps",
             "inference_fps",
+            "render_fps",
             "backend",
             "hailo_latency",
             "total_latency",
@@ -557,6 +558,19 @@ class MainWindow(QMainWindow):
         except (KeyError, ValueError, cv2.error) as exc:
             LOGGER.error("GUI_RENDER_FAILED camera=%s frame=%s source=%s error=%s", camera_id, frame_id, source, exc)
             return
+        
+        # Calculate Render FPS
+        now = time()
+        if not hasattr(self, "_render_frames"):
+            self._render_frames = 0
+            self._last_render_time = now
+        self._render_frames += 1
+        if now - self._last_render_time >= 1.0:
+            render_fps = self._render_frames / (now - self._last_render_time)
+            self.status_labels["render_fps"].setText(f"{render_fps:.1f}")
+            self._render_frames = 0
+            self._last_render_time = now
+
         if frame_id >= 0 and frame_id % 30 == 0:
             LOGGER.info("GUI_RENDER camera=%s frame=%s source=%s timestamp=%.3f", camera_id, frame_id, source, time())
 
@@ -596,8 +610,25 @@ class MainWindow(QMainWindow):
         self.status_labels["last_detection"].setText("-" if stats.last_detection_at is None else f"{time():.0f}")
 
     def _poll_host_status(self) -> None:
+        import os
         self.status_labels["cpu"].setText(f"{psutil.cpu_percent(interval=None):.0f}%")
-        self.status_labels["ram"].setText(f"{psutil.virtual_memory().percent:.0f}%")
+        
+        vm = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+        try:
+            proc = psutil.Process(os.getpid())
+            rss_mb = proc.memory_info().rss / 1024 / 1024
+            vms_mb = proc.memory_info().vms / 1024 / 1024
+        except Exception:
+            rss_mb, vms_mb = 0.0, 0.0
+            
+        ram_text = (
+            f"T:{vm.total/1024/1024:.0f}MB | U:{vm.used/1024/1024:.0f}MB | "
+            f"F:{vm.free/1024/1024:.0f}MB | S:{swap.used/1024/1024:.0f}MB | "
+            f"RSS:{rss_mb:.0f}MB | VMS:{vms_mb:.0f}MB"
+        )
+        self.status_labels["ram"].setText(ram_text)
+        
         temp = read_pi_temperature_c()
         self.status_labels["temperature"].setText("-" if temp is None else f"{temp:.1f} C")
         if self.captures:
