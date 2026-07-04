@@ -1,0 +1,23 @@
+{
+  "model_name": "YOLO26m COCO Detection HAILO10H (person filter)",
+  "hef_path": "models/yolo26m_detection_hailo10h_640.hef",
+  "hef_sha256": "f1435f7235c77b05736a5ab01b673cc156a95d85b5126aee7f7eb062ec2b2c66",
+  "hef_source_url": "https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v5.4.0/hailo10h/yolo26m.hef",
+  "onnx_package_url": "https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ObjectDetection/Detection-COCO/yolo/yolo26m/2026-02-16/yolo26m.zip",
+  "postprocess_onnx_path": "models/yolo26m_postprocessing.onnx",
+  "postprocess_onnx_sha256": "2401071729d3d5e59145920aefe66afae0443731de2546d3239dbec3bb2a6e2f",
+  "postprocess_config_path": "models/config_onnx_yolo26m.json",
+  "input": "UINT8 NHWC(640x640x3)",
+  "outputs": [
+    "yolo26m/conv71",
+    "yolo26m/conv87",
+    "yolo26m/conv101",
+    "yolo26m/conv74",
+    "yolo26m/conv90",
+    "yolo26m/conv104"
+  ],
+  "person_class_id": 0,
+  "verified_on": "2026-07-04",
+  "verified_hardware": "HAILO10H",
+  "verified_result": "HailoRT load, image smoke, live dual-camera GUI"
+}

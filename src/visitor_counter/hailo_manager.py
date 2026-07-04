@@ -183,6 +183,8 @@ class HailoManager:
             return []
         if self.config.output_format == "yolo26_pose":
             return self._decode_yolo26_pose_outputs(outputs, original_width, original_height)
+        if self.config.output_format == "yolo26_detection" and self._onnx_session is not None:
+            return self._decode_yolo26_detection_outputs(outputs, original_width, original_height)
         for value in outputs.values():
             if isinstance(value, list):
                 return self._decode_hailo_nms_list(value, original_width, original_height)
@@ -240,7 +242,7 @@ class HailoManager:
         return parsed
 
     def _initialize_postprocess(self) -> None:
-        if self.config.output_format != "yolo26_pose":
+        if not self.config.postprocess_config_path and not self.config.postprocess_onnx_path:
             return
         config_path = self._resolve_project_path(self.config.postprocess_config_path)
         onnx_path = self._resolve_project_path(self.config.postprocess_onnx_path)
@@ -256,7 +258,7 @@ class HailoManager:
         options = ort.SessionOptions()
         options.log_severity_level = 3
         self._onnx_session = ort.InferenceSession(str(onnx_path), sess_options=options, providers=["CPUExecutionProvider"])
-        LOGGER.info("Loaded YOLO26 pose ONNX postprocess: %s", onnx_path)
+        LOGGER.info("Loaded %s ONNX postprocess: %s", self.config.output_format, onnx_path)
 
     def _resolve_project_path(self, value: str) -> Path:
         path = Path(value)
@@ -301,6 +303,27 @@ class HailoManager:
                 continue
             parsed.append(Detection(bbox, float(row[4]), class_id=0, label="person"))
         return parsed
+
+    def _decode_yolo26_detection_outputs(
+        self,
+        outputs: dict[str, np.ndarray],
+        original_width: int,
+        original_height: int,
+    ) -> list[Detection]:
+        if self._onnx_config is None or self._onnx_session is None:
+            raise HailoUnavailableError("YOLO26 detection postprocess is not initialized")
+        tensor_mapping = self._onnx_config.get("output_tensor_mapping", {})
+        onnx_inputs = map_hef_outputs_to_onnx_inputs(outputs, tensor_mapping)
+        output_names = [output.name for output in self._onnx_session.get_outputs()]
+        onnx_results = self._onnx_session.run(output_names, onnx_inputs)
+        return parse_yolo26_postprocess_output(
+            np.asarray(onnx_results[0], dtype=np.float32),
+            original_width,
+            original_height,
+            self.config.confidence_threshold,
+            self.config.input_size,
+            self.config.max_detections,
+        )
 
     def _map_model_box_to_original(self, coords: np.ndarray, original_width: int, original_height: int) -> BoundingBox:
         model_size = float(self.config.input_size)
@@ -407,6 +430,37 @@ def parse_yolo26_coco_output(
         x1, y1, x2, y2 = [float(value) for value in boxes[index]]
         detections.append(Detection(BoundingBox(x1, y1, x2, y2), float(scores[index]), class_id=0, label="person"))
     return detections
+
+
+def parse_yolo26_postprocess_output(
+    raw: np.ndarray,
+    original_width: int,
+    original_height: int,
+    confidence_threshold: float,
+    input_size: int = 640,
+    max_detections: int = 300,
+) -> list[Detection]:
+    detections = np.asarray(raw, dtype=np.float32)
+    if detections.ndim == 3:
+        detections = detections[0]
+    if detections.ndim != 2 or detections.shape[1] < 6:
+        return []
+    scores = detections[:, 4]
+    class_ids = detections[:, 5].astype(np.int32)
+    valid = (scores >= confidence_threshold) & (class_ids == 0)
+    rows = detections[valid]
+    if rows.size == 0:
+        return []
+    rows = rows[np.argsort(-rows[:, 4])[:max_detections]]
+    boxes = _map_model_boxes_to_original(rows[:, :4], original_width, original_height, input_size)
+    parsed: list[Detection] = []
+    for row, box in zip(rows, boxes):
+        x1, y1, x2, y2 = [float(value) for value in box]
+        bbox = BoundingBox(x1, y1, x2, y2)
+        if bbox.width <= 1 or bbox.height <= 1:
+            continue
+        parsed.append(Detection(bbox, float(row[4]), class_id=0, label="person"))
+    return parsed
 
 
 def _map_model_boxes_to_original(boxes: np.ndarray, original_width: int, original_height: int, input_size: int) -> np.ndarray:

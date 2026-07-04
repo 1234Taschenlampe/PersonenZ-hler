@@ -40,17 +40,21 @@ class ModelStatus:
     def active_display_name(self) -> str:
         if self.active_model_name:
             return self.active_model_name
+        if self.hef_exists and not self.error_message:
+            return self.configured_model_name
         return "Nicht verfuegbar" if self.error_message else "Nicht geladen"
 
     @property
     def actual_hef_display(self) -> str:
         if self.active_model_name:
             return self.path.name
+        if self.hef_exists and not self.error_message:
+            return self.path.name
         return "Datei fehlt" if not self.hef_exists else "Nicht geladen"
 
     @property
     def sha256_display(self) -> str:
-        return self.hef_sha256 if self.active_model_name and self.hef_sha256 else "Nicht verfuegbar"
+        return self.hef_sha256 if self.hef_exists and self.hef_sha256 and not self.error_message else "Nicht verfuegbar"
 
     @property
     def inference_display(self) -> str:
@@ -91,17 +95,20 @@ class ModelManager:
         configured_target = path.resolve(strict=False) == target_path.resolve(strict=False)
         using_fallback = not configured_target or self.config.allow_fallback or self.config.detector_fallback_enabled
         if exists and configured_target and not using_fallback:
-            message = f"Custom YOLO26x COCO HEF exists; runtime Hailo self-test has not run: {path}"
+            message = f"Approved YOLO26 COCO detection HEF exists; runtime Hailo self-test has not run: {path}"
             error_message = ""
         elif using_fallback:
-            message = "Detector inactive: only models/yolo26x_person_hailo10h_640.hef is allowed in production; COCO class 0 person is filtered"
+            message = (
+                f"Detector inactive: only {self.config.custom_target_hef_path} is allowed in production; "
+                "COCO class 0 person is filtered"
+            )
             error_message = message
         elif raw_path_exists and path.is_symlink():
             message = f"Detector inactive: configured HEF is a symlink and is rejected: {path}"
             error_message = message
         else:
             message = f"Die erforderliche HEF fehlt: {target_path}"
-            error_message = f"YOLO26x nicht verfuegbar: erforderliche Custom-HEF fehlt: {target_path}"
+            error_message = f"YOLO26 nicht verfuegbar: erforderliche Detection-HEF fehlt: {target_path}"
         return ModelStatus(
             self.config.model_name,
             path,
@@ -130,7 +137,7 @@ class ModelManager:
     def require_available(self) -> ModelStatus:
         status = self.status()
         if status.using_fallback:
-            raise ModelUnavailableError("Silent model fallback is disabled; refusing to load any non-custom YOLO26x HEF")
+            raise ModelUnavailableError("Silent model fallback is disabled; refusing to load any non-approved YOLO26 detection HEF")
         if not status.exists:
             raise ModelUnavailableError(status.message)
         expected_name = self.target_hef_path.name

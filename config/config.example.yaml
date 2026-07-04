@@ -36,14 +36,17 @@ cameras:
     exit_zone: far
     masks: []
 model:
-  hef_path: models/yolo26x_person_hailo10h_640.hef
-  model_name: YOLO26x COCO Detection HAILO10H (person filter)
-  target_model_name: YOLO26x COCO Detection HAILO10H (person filter)
-  target_hef_path: models/yolo26x_person_hailo10h_640.hef
+  hef_path: models/yolo26m_detection_hailo10h_640.hef
+  model_name: YOLO26m COCO Detection HAILO10H (person filter)
+  target_model_name: YOLO26m COCO Detection HAILO10H (person filter)
+  target_hef_path: models/yolo26m_detection_hailo10h_640.hef
   detector_candidates:
+  - name: YOLO26m COCO Detection HAILO10H (person filter)
+    path: models/yolo26m_detection_hailo10h_640.hef
+    role: required_runtime
   - name: YOLO26x COCO Detection HAILO10H (person filter)
     path: models/yolo26x_person_hailo10h_640.hef
-    role: required_runtime
+    role: not_available_for_hailo10h
   - name: YOLO11x Detection HAILO10H
     path: models/yolo11x_hailo10h.hef
     role: manual_rollback_only
@@ -56,8 +59,8 @@ model:
   reid_model_name: OSNet x1.0 HAILO10H
   reid_hef_path: models/osnet_x1_0_hailo10h.hef
   reid_required: true
-  postprocess_onnx_path: ''
-  postprocess_config_path: ''
+  postprocess_onnx_path: models/yolo26m_postprocessing.onnx
+  postprocess_config_path: models/config_onnx_yolo26m.json
   output_format: yolo26_detection
   model_type: Detection
   input_size: 640
@@ -67,6 +70,11 @@ model:
   allow_fallback: false
   require_custom_yolo26x: true
   detector_fallback_enabled: false
+  custom_target_model_name: YOLO26m COCO Detection HAILO10H (person filter)
+  custom_target_hef_path: models/yolo26m_detection_hailo10h_640.hef
+  active_detector_policy: Only the official YOLO26m COCO HAILO10H detection HEF
+    may run; inference filters COCO class 0 person and missing or invalid HEF disables
+    detection and counting.
 tracking:
   tracker: bytetrack
   max_lost_frames: 20

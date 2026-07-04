@@ -1,0 +1,95 @@
+2026-07-04 16:05:52,467 WARNING visitor_counter.tracker: Ultralytics is installed, but the embedded fallback tracker is active until ByteTrack wiring is configured.
+2026-07-04 16:05:52,467 WARNING visitor_counter.tracker: Ultralytics is installed, but the embedded fallback tracker is active until ByteTrack wiring is configured.
+2026-07-04 16:05:52,467 WARNING visitor_counter.tracker: Ultralytics is installed, but the embedded fallback tracker is active until ByteTrack wiring is configured.
+2026-07-04 16:05:52,468 INFO visitor_counter.inference_pipeline: Starting processing pipeline
+2026-07-04 16:05:52,468 INFO visitor_counter.gui: Display raw frames only mode: False
+[0;93m2026-07-04 16:05:53.301091068 [W:onnxruntime:Default, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card1": device_discovery.cc:93 ReadFileContents Failed to open file: "/sys/class/drm/card1/device/vendor"[m
+[0;93m2026-07-04 16:05:53.301153772 [W:onnxruntime:Default, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card0": device_discovery.cc:93 ReadFileContents Failed to open file: "/sys/class/drm/card0/device/vendor"[m
+2026-07-04 16:05:53,315 INFO visitor_counter.hailo_manager: Loaded yolo26_detection ONNX postprocess: /home/raspibob/PersonenZ-hler/models/yolo26m_postprocessing.onnx
+2026-07-04 16:05:53,317 INFO visitor_counter.hailo_manager: YOLO26m COCO Detection HAILO10H (person filter) - Hailo-Inferenz aktiv (yolo26m_detection_hailo10h_640.hef, f1435f7235c7, HAILO10H)
+2026-07-04 16:05:54,397 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=30 shape=1280x720 timestamp=1783173954.391
+2026-07-04 16:05:54,397 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=30
+2026-07-04 16:05:54,460 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_1 frame=30 age_ms=69.0
+2026-07-04 16:05:54,462 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=30 source=raw timestamp=1783173954.462
+2026-07-04 16:05:54,639 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=30 shape=1280x720 timestamp=1783173954.637
+2026-07-04 16:05:54,639 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=30
+2026-07-04 16:05:54,648 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=30 age_ms=11.2
+2026-07-04 16:05:54,651 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=30 source=raw timestamp=1783173954.652
+2026-07-04 16:05:54,717 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=30 source=processed timestamp=1783173954.718
+2026-07-04 16:05:55,382 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=60 shape=1280x720 timestamp=1783173955.382
+2026-07-04 16:05:55,382 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=60
+2026-07-04 16:05:56,391 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=90 shape=1280x720 timestamp=1783173956.389
+2026-07-04 16:05:56,391 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=90
+2026-07-04 16:05:56,409 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=60 shape=1280x720 timestamp=1783173956.407
+2026-07-04 16:05:56,409 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=60
+2026-07-04 16:05:56,429 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_1 frame=90 age_ms=39.5
+2026-07-04 16:05:56,431 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=90 source=raw timestamp=1783173956.431
+2026-07-04 16:05:56,431 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=60 age_ms=24.1
+2026-07-04 16:05:56,441 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=60 source=raw timestamp=1783173956.441
+2026-07-04 16:05:56,517 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=60 source=processed timestamp=1783173956.517
+2026-07-04 16:05:57,389 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=120 shape=1280x720 timestamp=1783173957.386
+2026-07-04 16:05:57,389 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=120
+2026-07-04 16:05:57,423 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_1 frame=120 age_ms=37.2
+2026-07-04 16:05:57,425 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=120 source=raw timestamp=1783173957.425
+2026-07-04 16:05:57,427 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=120 source=processed timestamp=1783173957.427
+2026-07-04 16:05:58,391 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=150 shape=1280x720 timestamp=1783173958.391
+2026-07-04 16:05:58,391 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=150
+2026-07-04 16:05:58,425 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=90 shape=1280x720 timestamp=1783173958.418
+2026-07-04 16:05:58,425 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=90
+2026-07-04 16:05:58,434 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=90 age_ms=16.9
+2026-07-04 16:05:58,436 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=90 source=raw timestamp=1783173958.437
+2026-07-04 16:05:58,491 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=90 source=processed timestamp=1783173958.491
+2026-07-04 16:05:59,394 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=180 shape=1280x720 timestamp=1783173959.394
+2026-07-04 16:05:59,394 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=180
+2026-07-04 16:06:00,396 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=210 shape=1280x720 timestamp=1783173960.394
+2026-07-04 16:06:00,396 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=210
+2026-07-04 16:06:00,404 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=120 shape=1280x720 timestamp=1783173960.404
+2026-07-04 16:06:00,404 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=120
+2026-07-04 16:06:00,410 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_1 frame=210 age_ms=16.0
+2026-07-04 16:06:00,412 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=210 source=raw timestamp=1783173960.413
+2026-07-04 16:06:00,485 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=210 source=processed timestamp=1783173960.485
+2026-07-04 16:06:01,398 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=240 shape=1280x720 timestamp=1783173961.399
+2026-07-04 16:06:01,398 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=240
+2026-07-04 16:06:02,398 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=270 shape=1280x720 timestamp=1783173962.399
+2026-07-04 16:06:02,398 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=270
+2026-07-04 16:06:02,406 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=150 shape=1280x720 timestamp=1783173962.404
+2026-07-04 16:06:02,406 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=150
+2026-07-04 16:06:02,443 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=150 age_ms=39.2
+2026-07-04 16:06:02,447 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=150 source=raw timestamp=1783173962.448
+2026-07-04 16:06:02,449 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=150 source=processed timestamp=1783173962.449
+2026-07-04 16:06:03,412 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=300 shape=1280x720 timestamp=1783173963.413
+2026-07-04 16:06:03,413 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=300
+2026-07-04 16:06:04,406 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=180 shape=1280x720 timestamp=1783173964.401
+2026-07-04 16:06:04,406 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=180
+2026-07-04 16:06:04,413 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=330 shape=1280x720 timestamp=1783173964.411
+2026-07-04 16:06:04,413 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=330
+2026-07-04 16:06:04,457 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=180 age_ms=56.5
+2026-07-04 16:06:04,464 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=180 source=raw timestamp=1783173964.465
+2026-07-04 16:06:04,465 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_1 frame=330 age_ms=54.0
+2026-07-04 16:06:04,467 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=330 source=raw timestamp=1783173964.467
+2026-07-04 16:06:04,542 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=330 source=processed timestamp=1783173964.542
+2026-07-04 16:06:05,408 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=360 shape=1280x720 timestamp=1783173965.408
+2026-07-04 16:06:05,408 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=360
+2026-07-04 16:06:06,403 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=210 shape=1280x720 timestamp=1783173966.401
+2026-07-04 16:06:06,403 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=210
+2026-07-04 16:06:06,413 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=390 shape=1280x720 timestamp=1783173966.411
+2026-07-04 16:06:06,413 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=390
+2026-07-04 16:06:06,443 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=210 age_ms=42.9
+2026-07-04 16:06:06,446 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=210 source=raw timestamp=1783173966.446
+2026-07-04 16:06:06,446 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_1 frame=390 age_ms=34.9
+2026-07-04 16:06:06,452 INFO visitor_counter.gui: GUI_RENDER camera=camera_1 frame=390 source=raw timestamp=1783173966.452
+2026-07-04 16:06:06,454 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=210 source=processed timestamp=1783173966.455
+2026-07-04 16:06:07,414 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=420 shape=1280x720 timestamp=1783173967.415
+2026-07-04 16:06:07,415 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=420
+2026-07-04 16:06:08,401 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=240 shape=1280x720 timestamp=1783173968.402
+2026-07-04 16:06:08,402 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=240
+2026-07-04 16:06:08,423 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=450 shape=1280x720 timestamp=1783173968.424
+2026-07-04 16:06:08,423 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=450
+2026-07-04 16:06:09,419 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=480 shape=1280x720 timestamp=1783173969.419
+2026-07-04 16:06:09,419 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=480
+2026-07-04 16:06:10,402 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_2 frame=270 shape=1280x720 timestamp=1783173970.398
+2026-07-04 16:06:10,402 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_2 frame=270
+2026-07-04 16:06:10,420 INFO visitor_counter.camera_manager: CAMERA_CAPTURE camera=camera_1 frame=510 shape=1280x720 timestamp=1783173970.420
+2026-07-04 16:06:10,427 INFO visitor_counter.camera_manager: FRAME_PUBLISH camera=camera_1 frame=510
+2026-07-04 16:06:10,460 INFO visitor_counter.gui: GUI_RECEIVE camera=camera_2 frame=270 age_ms=62.7
+2026-07-04 16:06:10,462 INFO visitor_counter.gui: GUI_RENDER camera=camera_2 frame=270 source=raw timestamp=1783173970.462

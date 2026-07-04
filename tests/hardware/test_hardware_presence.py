@@ -22,20 +22,21 @@ def test_two_video_devices_present() -> None:
 
 
 @pytest.mark.hardware
-def test_runtime_config_requires_custom_yolo26x_and_disables_fallback() -> None:
+def test_runtime_config_requires_yolo26m_detection_and_disables_fallback() -> None:
     config = Path("config/config.yaml").read_text(encoding="utf-8")
     assert "require_custom_yolo26x: true" in config
     assert "detector_fallback_enabled: false" in config
-    assert "hef_path: models/yolo26x_person_hailo10h_640.hef" in config
+    assert "hef_path: models/yolo26m_detection_hailo10h_640.hef" in config
+    assert "postprocess_onnx_path: models/yolo26m_postprocessing.onnx" in config
 
 
 @pytest.mark.hardware
-def test_custom_yolo26x_hef_is_regular_when_available() -> None:
-    target = Path("models/yolo26x_person_hailo10h_640.hef")
+def test_yolo26m_detection_hef_is_regular_when_available() -> None:
+    target = Path("models/yolo26m_detection_hailo10h_640.hef")
     if not target.exists():
-        pytest.skip("custom YOLO26x COCO HAILO10H HEF not deployed yet")
-    assert target.is_file() and not target.is_symlink(), "custom YOLO26x HEF must be a regular file"
-    assert target.stat().st_size > 0, "custom YOLO26x HEF must not be empty"
+        pytest.skip("YOLO26m COCO HAILO10H detection HEF not deployed yet")
+    assert target.is_file() and not target.is_symlink(), "YOLO26m detection HEF must be a regular file"
+    assert target.stat().st_size > 0, "YOLO26m detection HEF must not be empty"
 
 
 @pytest.mark.hardware

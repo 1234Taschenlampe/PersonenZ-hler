@@ -29,18 +29,19 @@ class CameraConfig:
 
 @dataclass
 class ModelConfig:
-    hef_path: str = "models/yolo26x_person_hailo10h_640.hef"
-    model_name: str = "YOLO26x COCO Detection HAILO10H (person filter)"
-    target_model_name: str = "YOLO26x COCO Detection HAILO10H (person filter)"
-    target_hef_path: str = "models/yolo26x_person_hailo10h_640.hef"
-    custom_target_model_name: str = "YOLO26x COCO Detection HAILO10H (person filter)"
-    custom_target_hef_path: str = "models/yolo26x_person_hailo10h_640.hef"
+    hef_path: str = "models/yolo26m_detection_hailo10h_640.hef"
+    model_name: str = "YOLO26m COCO Detection HAILO10H (person filter)"
+    target_model_name: str = "YOLO26m COCO Detection HAILO10H (person filter)"
+    target_hef_path: str = "models/yolo26m_detection_hailo10h_640.hef"
+    custom_target_model_name: str = "YOLO26m COCO Detection HAILO10H (person filter)"
+    custom_target_hef_path: str = "models/yolo26m_detection_hailo10h_640.hef"
     require_custom_yolo26x: bool = True
     detector_fallback_enabled: bool = False
-    active_detector_policy: str = "Only the custom YOLO26x COCO HAILO10H HEF may run; inference filters COCO class 0 person and missing or invalid HEF disables detection and counting."
+    active_detector_policy: str = "Only the official YOLO26m COCO HAILO10H detection HEF may run; inference filters COCO class 0 person and missing or invalid HEF disables detection and counting."
     detector_candidates: list[dict[str, str]] = field(
         default_factory=lambda: [
-            {"name": "YOLO26x COCO Detection HAILO10H (person filter)", "path": "models/yolo26x_person_hailo10h_640.hef", "role": "required_runtime"},
+            {"name": "YOLO26m COCO Detection HAILO10H (person filter)", "path": "models/yolo26m_detection_hailo10h_640.hef", "role": "required_runtime"},
+            {"name": "YOLO26x COCO Detection HAILO10H (person filter)", "path": "models/yolo26x_person_hailo10h_640.hef", "role": "not_available_for_hailo10h"},
             {"name": "YOLO11x Detection HAILO10H", "path": "models/yolo11x_hailo10h.hef", "role": "manual_rollback_only"},
             {"name": "YOLO11l Detection HAILO10H", "path": "models/yolo11l_hailo10h.hef", "role": "comparison_only"},
             {"name": "YOLO26m Pose HAILO10H", "path": "models/yolo26m_pose_hailo10h_640.hef", "role": "forbidden_detector"},
@@ -49,8 +50,8 @@ class ModelConfig:
     reid_model_name: str = "OSNet x1.0 HAILO10H"
     reid_hef_path: str = "models/osnet_x1_0_hailo10h.hef"
     reid_required: bool = True
-    postprocess_onnx_path: str = ""
-    postprocess_config_path: str = ""
+    postprocess_onnx_path: str = "models/yolo26m_postprocessing.onnx"
+    postprocess_config_path: str = "models/config_onnx_yolo26m.json"
     output_format: str = "yolo26_detection"
     model_type: str = "Detection"
     input_size: int = 640
@@ -202,17 +203,21 @@ def validate_config(config: AppConfig) -> list[str]:
     if config.model.hef_path in forbidden_paths:
         errors.append("Pose HEFs must never be used as detection models.")
     if config.model.allow_fallback or config.model.detector_fallback_enabled:
-        errors.append("Model fallback must be disabled for production YOLO26x operation.")
+        errors.append("Model fallback must be disabled for production YOLO26 operation.")
     if not config.model.require_custom_yolo26x:
-        errors.append("Production runtime must require the custom YOLO26x HEF.")
+        errors.append("Production runtime must require the approved YOLO26 HEF.")
     if not config.model.reid_required:
         errors.append("Production runtime must require OSNet ReID HEF.")
     if config.model.hef_path != config.model.custom_target_hef_path:
-        errors.append("Configured detector HEF must be models/yolo26x_person_hailo10h_640.hef.")
+        errors.append(f"Configured detector HEF must be {config.model.custom_target_hef_path}.")
     if config.model.target_hef_path != config.model.custom_target_hef_path:
-        errors.append("Target detector HEF must be the custom YOLO26x COCO HEF with person filtering.")
+        errors.append("Target detector HEF must be the approved YOLO26 COCO detection HEF with person filtering.")
     if config.model.model_name != config.model.custom_target_model_name:
-        errors.append("Active detector name must be YOLO26x COCO Detection HAILO10H (person filter).")
+        errors.append(f"Active detector name must be {config.model.custom_target_model_name}.")
+    if config.model.output_format == "yolo26_detection" and (
+        not config.model.postprocess_onnx_path or not config.model.postprocess_config_path
+    ):
+        errors.append("YOLO26 detection requires ONNX postprocess model and config paths.")
     if not 0.0 < config.model.confidence_threshold < 1.0:
         errors.append("Model confidence threshold must be between 0 and 1.")
     if config.model.input_size <= 0:

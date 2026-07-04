@@ -1,0 +1,60 @@
+{
+  "full_onnx_path": "yolo26m_640.onnx",
+  "postproc_onnx_path": "yolo26m_postprocessing.onnx",
+  "hef_like_proc_onnx_path": "yolo26m_hef_like.onnx",
+  "output_tensor_mapping": {
+    "yolo26m/conv71": [
+      "/model.23/one2one_cv2.0/one2one_cv2.0.2/Conv_output_0",
+      [
+        4,
+        80,
+        80
+      ]
+    ],
+    "yolo26m/conv87": [
+      "/model.23/one2one_cv2.1/one2one_cv2.1.2/Conv_output_0",
+      [
+        4,
+        40,
+        40
+      ]
+    ],
+    "yolo26m/conv101": [
+      "/model.23/one2one_cv2.2/one2one_cv2.2.2/Conv_output_0",
+      [
+        4,
+        20,
+        20
+      ]
+    ],
+    "yolo26m/conv74": [
+      "/model.23/one2one_cv3.0/one2one_cv3.0.2/Conv_output_0",
+      [
+        80,
+        80,
+        80
+      ]
+    ],
+    "yolo26m/conv90": [
+      "/model.23/one2one_cv3.1/one2one_cv3.1.2/Conv_output_0",
+      [
+        80,
+        40,
+        40
+      ]
+    ],
+    "yolo26m/conv104": [
+      "/model.23/one2one_cv3.2/one2one_cv3.2.2/Conv_output_0",
+      [
+        80,
+        20,
+        20
+      ]
+    ]
+  },
+  "output_format": "yolo26",
+  "postprocess_params": {
+    "input_size": 640
+  },
+  "intermediate_tensors_to_add_sigmoid": []
+}

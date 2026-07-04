@@ -1,0 +1,11 @@
+HEF Compatible for: HAILO15H, HAILO10H
+Network group name: yolo26m, Multi Context - Number of contexts: 4
+    Network name: yolo26m/yolo26m
+        VStream infos:
+            Input  yolo26m/input_layer1 UINT8, NHWC(640x640x3)
+            Output yolo26m/conv71 UINT16, NHWC(80x80x4)
+            Output yolo26m/conv87 UINT16, NHWC(40x40x4)
+            Output yolo26m/conv101 UINT16, NHWC(20x20x4)
+            Output yolo26m/conv74 UINT16, NHWC(80x80x80)
+            Output yolo26m/conv90 UINT16, NHWC(40x40x80)
+            Output yolo26m/conv104 UINT16, NHWC(20x20x80)

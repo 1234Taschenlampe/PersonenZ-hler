@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from visitor_counter.hailo_manager import parse_yolo26_coco_output
+from visitor_counter.hailo_manager import parse_yolo26_coco_output, parse_yolo26_postprocess_output
 
 
 def _raw() -> np.ndarray:
@@ -49,3 +49,13 @@ def test_yolo26_respects_max_detections() -> None:
         raw[4, index] = 0.99 - (index * 0.01)
     detections = parse_yolo26_coco_output(raw, 1280, 720, 0.2, max_detections=5)
     assert len(detections) == 5
+
+
+def test_yolo26_postprocess_filters_person_class() -> None:
+    raw = np.zeros((1, 300, 6), dtype=np.float32)
+    raw[0, 0] = [160, 180, 320, 460, 0.91, 0]
+    raw[0, 1] = [10, 10, 200, 200, 0.99, 2]
+    detections = parse_yolo26_postprocess_output(raw, 1280, 720, 0.2)
+    assert len(detections) == 1
+    assert detections[0].class_id == 0
+    assert detections[0].label == "person"

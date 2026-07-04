@@ -460,7 +460,7 @@ class MainWindow(QMainWindow):
         if not selected:
             return
         source = Path(selected)
-        target = self.project_root / "models" / "yolo26x_person_hailo10h_640.hef"
+        target = self.project_root / self.config.model.custom_target_hef_path
         valid, message = self._validate_hef_basic(source)
         if not valid:
             self._show_warning(message)
@@ -615,20 +615,20 @@ class MainWindow(QMainWindow):
         self.status_labels["hef"].setText(str(status.path))
 
     def _model_status_lines(self) -> list[str]:
-        pt = self.project_root / "models" / "yolo26x.pt"
-        onnx = self.project_root / "models" / "yolo26x_640.onnx"
+        pt = self.project_root / "models" / "yolo26m_640.onnx"
+        onnx_postprocess = ModelManager(self.config.model, self.project_root).postprocess_onnx_path
         status = ModelManager(self.config.model, self.project_root).status()
         hef = status.path
         lines = [
-            "YOLO26x PT vorhanden" if pt.exists() else "YOLO26x PT fehlt",
-            "YOLO26x ONNX vorhanden" if onnx.exists() else "YOLO26x ONNX fehlt",
+            "YOLO26m ONNX vorhanden" if pt.exists() else "YOLO26m ONNX fehlt",
+            "YOLO26m Postprocess vorhanden" if onnx_postprocess and onnx_postprocess.exists() else "YOLO26m Postprocess fehlt",
         ]
         if not status.exists:
-            lines.append("YOLO26x HEF fehlt")
-            lines.append("YOLO26x ist noch nicht fuer Hailo-10H kompiliert. Personenerkennung und Zaehlung sind deaktiviert.")
+            lines.append("YOLO26m Detection HEF fehlt")
+            lines.append("YOLO26m Detection ist noch nicht fuer Hailo-10H installiert. Personenerkennung und Zaehlung sind deaktiviert.")
         else:
             valid, message = self._validate_hef_basic(hef)
-            lines.append("Custom YOLO26x HEF lesbar" if valid else f"YOLO26x HEF ungueltig: {message}")
+            lines.append("YOLO26m Detection HEF lesbar" if valid else f"YOLO26m HEF ungueltig: {message}")
         reid_status = OSNetReIDManager(self.config.model, self.project_root).status(validate_hailo=False)
         lines.append(reid_status.message)
         hailo = subprocess.run(["hailortcli", "scan"], capture_output=True, text=True, timeout=5)

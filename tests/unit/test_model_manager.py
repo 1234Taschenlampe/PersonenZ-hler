@@ -13,7 +13,7 @@ def test_missing_custom_hef_disables_detector(tmp_path: Path) -> None:
     status = manager.status()
     assert not status.exists
     assert not status.using_fallback
-    assert "YOLO26x" in status.error_message
+    assert "YOLO26" in status.error_message
     with pytest.raises(ModelUnavailableError):
         manager.require_available()
 
@@ -35,7 +35,7 @@ def test_custom_hef_symlink_is_rejected(tmp_path: Path) -> None:
     models.mkdir()
     real = models / "real.hef"
     real.write_bytes(b"hef")
-    link = models / "yolo26x_person_hailo10h_640.hef"
+    link = models / "yolo26m_detection_hailo10h_640.hef"
     try:
         link.symlink_to(real)
     except (OSError, NotImplementedError):

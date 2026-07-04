@@ -27,4 +27,4 @@ def test_config_validation_rejects_detector_fallback() -> None:
     config.model.detector_fallback_enabled = True
     errors = validate_config(config)
     assert any("fallback" in error.lower() for error in errors)
-    assert any("yolo26x_person_hailo10h_640.hef" in error for error in errors)
+    assert any("yolo26m_detection_hailo10h_640.hef" in error for error in errors)

@@ -47,7 +47,7 @@ class Detection:
     label: str = "person"
     camera_id: str = ""
     timestamp: float = 0.0
-    model_name: str = "YOLO26x person-only Detection HAILO10H"
+    model_name: str = "YOLO26m COCO Detection HAILO10H"
     model_sha256: str = ""
 
 
