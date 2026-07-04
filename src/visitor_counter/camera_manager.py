@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 from threading import Condition, Event, Thread
 from time import monotonic, sleep, time
+from typing import Callable
 
 import cv2
 
@@ -13,6 +14,7 @@ from .configuration import CameraConfig
 from .types import CameraStats, FramePacket
 
 LOGGER = logging.getLogger(__name__)
+FramePacketCallback = Callable[[FramePacket], None]
 
 
 class LatestFrameHub:
@@ -201,11 +203,18 @@ def discover_camera_devices() -> list[CameraDeviceInfo]:
 
 
 class CameraCapture(Thread):
-    def __init__(self, config: CameraConfig, output: LatestFrameHub, stop_event: Event) -> None:
+    def __init__(
+        self,
+        config: CameraConfig,
+        output: LatestFrameHub,
+        stop_event: Event,
+        frame_callback: FramePacketCallback | None = None,
+    ) -> None:
         super().__init__(daemon=True, name=f"capture-{config.camera_id}")
         self.config = config
         self.output = output
         self.stop_event = stop_event
+        self.frame_callback = frame_callback
         self.stats = CameraStats()
         self._frame_id = 0
 
@@ -250,6 +259,21 @@ class CameraCapture(Thread):
             if self.output.put(packet):
                 self.stats.dropped_frames += 1
                 self.stats.queue_replacements += 1
+            if self.frame_callback:
+                try:
+                    self.frame_callback(packet)
+                except Exception:
+                    LOGGER.exception("FRAME_CALLBACK_FAILED camera=%s frame=%s", self.config.camera_id, self._frame_id)
+            if self._frame_id % 30 == 0:
+                LOGGER.info(
+                    "CAMERA_CAPTURE camera=%s frame=%s shape=%sx%s timestamp=%.3f",
+                    self.config.camera_id,
+                    self._frame_id,
+                    packet.width,
+                    packet.height,
+                    packet.captured_at,
+                )
+                LOGGER.info("FRAME_PUBLISH camera=%s frame=%s", self.config.camera_id, self._frame_id)
             frames += 1
             now = monotonic()
             if now - last_tick >= 1.0:

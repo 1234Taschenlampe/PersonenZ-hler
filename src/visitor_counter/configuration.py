@@ -102,6 +102,12 @@ class DatabaseConfig:
 
 
 @dataclass
+class DisplayConfig:
+    display_raw_frames_only: bool = False
+    raw_frame_overlay: bool = True
+
+
+@dataclass
 class AppConfig:
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
@@ -123,6 +129,7 @@ class AppConfig:
     consensus: ConsensusConfig = field(default_factory=ConsensusConfig)
     timeout: TimeoutConfig = field(default_factory=TimeoutConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    display: DisplayConfig = field(default_factory=DisplayConfig)
 
 
 def _camera_from_dict(camera_id: str, data: dict[str, Any]) -> CameraConfig:
@@ -173,6 +180,7 @@ def load_config(path: Path) -> AppConfig:
         consensus=ConsensusConfig(**merged.get("consensus", {})),
         timeout=TimeoutConfig(**merged.get("timeout", {})),
         database=DatabaseConfig(**merged.get("database", {})),
+        display=DisplayConfig(**merged.get("display", {})),
     )
 
 

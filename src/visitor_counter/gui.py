@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import signal
 import socket
 import shutil
 import subprocess
 from threading import Event
-from time import sleep, time
+from time import monotonic, sleep, time
 from typing import Any
 
 import cv2
@@ -42,7 +43,9 @@ from .inference_pipeline import ProcessingPipeline
 from .logging_setup import configure_logging
 from .model_manager import ModelManager
 from .reid_manager import OSNetReIDManager
-from .types import RuntimeStats, TrackedObject
+from .types import FramePacket, RuntimeStats, TrackedObject
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CameraView(QLabel):
@@ -66,7 +69,17 @@ class CameraView(QLabel):
         self.update()
 
     def set_frame(self, frame: np.ndarray) -> None:
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if frame is None or frame.size == 0:
+            raise ValueError(f"{self.camera_id}: empty frame")
+        if frame.ndim != 3 or frame.shape[2] not in (3, 4):
+            raise ValueError(f"{self.camera_id}: unsupported frame shape {frame.shape}")
+        if frame.dtype != np.uint8:
+            raise ValueError(f"{self.camera_id}: unsupported frame dtype {frame.dtype}")
+        frame = np.ascontiguousarray(frame)
+        if frame.shape[2] == 4:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+        else:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         height, width, channels = rgb.shape
         image = QImage(rgb.data, width, height, channels * width, QImage.Format_RGB888).copy()
         self._pixmap = QPixmap.fromImage(image)
@@ -114,6 +127,7 @@ class CameraView(QLabel):
 
 class MainWindow(QMainWindow):
     frame_ready = Signal(str, object, list)
+    raw_frame_ready = Signal(str, object, int, float)
     stats_ready = Signal(object, object)
 
     def __init__(self, project_root: Path) -> None:
@@ -128,6 +142,10 @@ class MainWindow(QMainWindow):
         self.stop_event = Event()
         self.captures: list[CameraCapture] = []
         self.pipeline: ProcessingPipeline | None = None
+        self.latest_raw_frames: dict[str, tuple[int, float, np.ndarray]] = {}
+        self.latest_processed_frames: dict[str, tuple[float, np.ndarray]] = {}
+        self._next_raw_emit_at: dict[str, float] = {camera_id: 0.0 for camera_id in self.config.cameras}
+        self._raw_gui_interval_seconds = 1.0 / 15.0
         self.camera_devices = discover_cameras()
         self.camera_device_infos: list[CameraDeviceInfo] = []
         self.views: dict[str, CameraView] = {}
@@ -145,6 +163,7 @@ class MainWindow(QMainWindow):
         self._external_stop_timer = QTimer(self)
         self._external_stop_timer.timeout.connect(self._poll_external_stop)
         self._external_stop_timer.start(500)
+        self.start_processing()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -303,31 +322,36 @@ class MainWindow(QMainWindow):
 
     def _wire_signals(self) -> None:
         self.frame_ready.connect(self._on_frame_ready)
+        self.raw_frame_ready.connect(self._on_raw_frame_ready)
         self.stats_ready.connect(self._on_stats_ready)
         for view in self.views.values():
             view.line_changed.connect(self._on_line_changed)
         self.refresh_cameras()
 
     def start_processing(self) -> None:
-        if self.pipeline and self.pipeline.is_alive():
+        if any(capture.is_alive() for capture in self.captures) or (self.pipeline and self.pipeline.is_alive()):
             return
         self.stop_event = Event()
         self.frame_queue = LatestFrameHub(list(self.config.cameras))
         self.captures = [
-            CameraCapture(camera_config, self.frame_queue, self.stop_event)
+            CameraCapture(camera_config, self.frame_queue, self.stop_event, frame_callback=self._on_capture_packet)
             for camera_config in self.config.cameras.values()
         ]
-        self.pipeline = ProcessingPipeline(
-            self.config,
-            self.project_root,
-            self.frame_queue,
-            self.stop_event,
-            frame_callback=lambda camera_id, frame, tracks: self.frame_ready.emit(camera_id, frame, tracks),
-            stats_callback=lambda stats, counts: self.stats_ready.emit(stats, counts),
-        )
+        self.pipeline = None
+        if not self.config.display.display_raw_frames_only:
+            self.pipeline = ProcessingPipeline(
+                self.config,
+                self.project_root,
+                self.frame_queue,
+                self.stop_event,
+                frame_callback=lambda camera_id, frame, tracks: self.frame_ready.emit(camera_id, frame, tracks),
+                stats_callback=lambda stats, counts: self.stats_ready.emit(stats, counts),
+            )
         for capture in self.captures:
             capture.start()
-        self.pipeline.start()
+        if self.pipeline:
+            self.pipeline.start()
+        LOGGER.info("Display raw frames only mode: %s", self.config.display.display_raw_frames_only)
 
     def stop_processing(self) -> None:
         self.stop_event.set()
@@ -480,10 +504,61 @@ class MainWindow(QMainWindow):
         self.config.cameras[camera_id].line_start = start
         self.config.cameras[camera_id].line_end = end
 
+    def _on_capture_packet(self, packet: FramePacket) -> None:
+        now = monotonic()
+        if now < self._next_raw_emit_at.get(packet.camera_id, 0.0):
+            return
+        self._next_raw_emit_at[packet.camera_id] = now + self._raw_gui_interval_seconds
+        frame = packet.image.copy()
+        if self.config.display.raw_frame_overlay:
+            self._draw_raw_overlay(packet, frame)
+        self.raw_frame_ready.emit(packet.camera_id, frame, packet.frame_id, packet.captured_at)
+
+    def _draw_raw_overlay(self, packet: FramePacket, frame: np.ndarray) -> None:
+        label = "CAMERA 1 RAW" if packet.camera_id == "camera_1" else "CAMERA 2 RAW"
+        lines = [
+            label,
+            f"frame_id: {packet.frame_id}",
+            f"timestamp: {packet.captured_at:.3f}",
+            f"resolution: {packet.width}x{packet.height}",
+        ]
+        cv2.rectangle(frame, (0, 0), (360, 118), (0, 0, 0), -1)
+        for index, line in enumerate(lines):
+            cv2.putText(
+                frame,
+                line,
+                (16, 28 + index * 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.72,
+                (0, 255, 120),
+                2,
+                cv2.LINE_AA,
+            )
+
+    def _on_raw_frame_ready(self, camera_id: str, frame: object, frame_id: int, captured_at: float) -> None:
+        if not isinstance(frame, np.ndarray):
+            return
+        age_ms = (time() - captured_at) * 1000.0
+        self.latest_raw_frames[camera_id] = (frame_id, captured_at, frame)
+        if frame_id % 30 == 0:
+            LOGGER.info("GUI_RECEIVE camera=%s frame=%s age_ms=%.1f", camera_id, frame_id, age_ms)
+        self._render_frame(camera_id, frame, frame_id, "raw")
+
     def _on_frame_ready(self, camera_id: str, frame: object, tracks: list[TrackedObject]) -> None:
         _ = tracks
         if isinstance(frame, np.ndarray):
+            self.latest_processed_frames[camera_id] = (time(), frame)
+            fallback_frame_id = self.latest_raw_frames.get(camera_id, (-1, 0.0, frame))[0]
+            self._render_frame(camera_id, frame, fallback_frame_id, "processed")
+
+    def _render_frame(self, camera_id: str, frame: np.ndarray, frame_id: int, source: str) -> None:
+        try:
             self.views[camera_id].set_frame(frame)
+        except (KeyError, ValueError, cv2.error) as exc:
+            LOGGER.error("GUI_RENDER_FAILED camera=%s frame=%s source=%s error=%s", camera_id, frame_id, source, exc)
+            return
+        if frame_id >= 0 and frame_id % 30 == 0:
+            LOGGER.info("GUI_RENDER camera=%s frame=%s source=%s timestamp=%.3f", camera_id, frame_id, source, time())
 
     def _on_stats_ready(self, stats: RuntimeStats, counts: GlobalCounts) -> None:
         self.count_labels["global_inside"].setText(str(counts.inside))

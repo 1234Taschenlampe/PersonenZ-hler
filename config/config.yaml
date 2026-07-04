@@ -93,3 +93,6 @@ timeout:
 database:
   path: data/person_counter.sqlite3
   store_video_frames: false
+display:
+  display_raw_frames_only: false
+  raw_frame_overlay: true

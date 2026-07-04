@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from threading import Event
 from time import monotonic, time
 
 import numpy as np
 
-from visitor_counter.camera_manager import LatestFrameHub
+from visitor_counter.camera_manager import CameraCapture, LatestFrameHub
+from visitor_counter.configuration import CameraConfig
 from visitor_counter.types import FramePacket, LatencyWindow
 
 
@@ -54,6 +56,33 @@ def test_latest_frame_hub_drops_stale_frame() -> None:
 
     assert hub.get_next(["camera_1"], timeout=0.0, max_age_seconds=0.5) is None
     assert hub.dropped_counts()["camera_1"] == 1
+
+
+def test_camera_capture_publishes_to_hub_and_callback() -> None:
+    class FakeCapture:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def read(self) -> tuple[bool, np.ndarray | None]:
+            self.reads += 1
+            return True, np.zeros((8, 12, 3), dtype=np.uint8)
+
+    hub = LatestFrameHub(["camera_1"])
+    stop_event = Event()
+    callback_packets: list[FramePacket] = []
+
+    def on_frame(packet: FramePacket) -> None:
+        callback_packets.append(packet)
+        stop_event.set()
+
+    capture = CameraCapture(CameraConfig(camera_id="camera_1"), hub, stop_event, frame_callback=on_frame)
+    capture._capture_loop(FakeCapture())  # noqa: SLF001 - focused unit test for capture fan-out
+
+    queued = hub.get_next(["camera_1"], timeout=0.0)
+    assert queued is not None
+    assert callback_packets
+    assert queued.frame_id == callback_packets[0].frame_id == 1
+    assert queued.image.shape == callback_packets[0].image.shape == (8, 12, 3)
 
 
 def test_latency_window_reports_summary_statistics() -> None:

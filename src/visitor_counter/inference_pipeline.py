@@ -102,7 +102,6 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.detector_error = str(exc)
             LOGGER.error("Processing pipeline cannot start: %s", exc)
             self._emit_stats()
-            self.stop_event.set()
             self.database.close()
             return
         frames = 0
