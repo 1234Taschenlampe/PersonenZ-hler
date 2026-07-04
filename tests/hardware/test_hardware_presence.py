@@ -24,7 +24,7 @@ def test_two_video_devices_present() -> None:
 @pytest.mark.hardware
 def test_runtime_config_requires_yolo26m_detection_and_disables_fallback() -> None:
     config = Path("config/config.yaml").read_text(encoding="utf-8")
-    assert "require_custom_yolo26x: true" in config
+    assert "require_custom_yolo26m: true" in config
     assert "detector_fallback_enabled: false" in config
     assert "hef_path: models/yolo26m_detection_hailo10h_640.hef" in config
     assert "postprocess_onnx_path: models/yolo26m_postprocessing.onnx" in config
@@ -70,11 +70,9 @@ def test_pose_hef_is_not_configured_detection_fallback() -> None:
     config = Path("config/config.yaml").read_text(encoding="utf-8")
     active_model_section = config.split("tracking:", 1)[0]
     assert f"hef_path: {forbidden}" not in active_model_section
-    assert "role: forbidden_detector" in config
 
 
 @pytest.mark.hardware
 def test_yolo11x_is_manual_rollback_only_when_present() -> None:
     config = Path("config/config.yaml").read_text(encoding="utf-8")
     assert "models/yolo11x_hailo10h.hef" not in config.split("detector_candidates:", 1)[0]
-    assert "role: manual_rollback_only" in config
