@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Filled with SHA-256 hashes of training-only calibration images.",
+  "minimum_target_images": 2048,
+  "items": []
+}

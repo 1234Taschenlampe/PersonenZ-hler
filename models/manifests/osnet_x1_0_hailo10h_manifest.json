@@ -1,0 +1,23 @@
+{
+  "model": "osnet_x1_0",
+  "source": "Hailo Model Zoo compiled v5.3.0 hailo10h",
+  "source_url": "https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v5.3.0/hailo10h/osnet_x1_0.hef",
+  "hef": "models/osnet_x1_0_hailo10h.hef",
+  "hef_sha256": "5c376b5e16cc42d8e5511aad649cc74b9503d4f44911a28ab157cbe899db1d39",
+  "compatible_architectures": ["HAILO15H", "HAILO10H"],
+  "inputs": [
+    {
+      "name": "osnet_x1_0/input_layer1",
+      "shape": [256, 128, 3],
+      "format": "UINT8 NHWC"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "osnet_x1_0/fc1",
+      "shape": [512],
+      "format": "UINT8 NC"
+    }
+  ],
+  "embedding_dimension": 512
+}

@@ -1,0 +1,7 @@
+Source path: C:\Users\Felix\OneDrive\Documents\Ki kammera pi
+Backup path: C:\Users\Felix\OneDrive\Documents\Ki_kammera_pi_backup_20260704_150446
+Created at: 2026-07-04 15:04:46 Europe/Berlin
+Robocopy return code: 1
+Copied file count: 118
+Excluded directories: .git, .venv, __pycache__, .pytest_cache
+Result: backup exists and was verified after copy.

@@ -1,0 +1,9 @@
+{
+  "model_name": "custom_yolo26x_person_hailo10h_640",
+  "status": "not_compiled",
+  "target_architecture": "HAILO10H",
+  "class_names": ["person"],
+  "class_count": 1,
+  "input": "static 1x3x640x640",
+  "artifacts": {}
+}

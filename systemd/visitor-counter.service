@@ -1,0 +1,21 @@
+[Unit]
+Description=YOLO26x Dual-Camera Visitor Counter
+After=graphical.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=raspibob
+WorkingDirectory=/home/raspibob/PersonenZ-hler
+ExecStart=/home/raspibob/PersonenZ-hler/.venv/bin/python -m visitor_counter.app --project-root /home/raspibob/PersonenZ-hler
+ExecStop=/usr/bin/touch /home/raspibob/PersonenZ-hler/logs/visitor_counter.stop
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
+KillSignal=SIGINT
+TimeoutStopSec=20
+Environment=PYTHONPATH=/home/raspibob/PersonenZ-hler/src
+
+[Install]
+WantedBy=graphical.target

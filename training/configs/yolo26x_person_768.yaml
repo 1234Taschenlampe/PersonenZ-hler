@@ -1,0 +1,12 @@
+model: yolo26x.pt
+task: detect
+imgsz: 768
+batch: auto
+epochs: 200
+patience: 40
+seed: 42
+deterministic: true
+single_cls: true
+classes: [0]
+project: training/runs
+name: yolo26x_person_768_seed42

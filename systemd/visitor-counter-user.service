@@ -1,0 +1,20 @@
+[Unit]
+Description=YOLO26x Dual-Camera Visitor Counter GUI
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/PersonenZ-hler
+Environment=PYTHONPATH=%h/PersonenZ-hler/src
+Environment=DISPLAY=:0
+Environment=QT_QPA_PLATFORM=xcb
+ExecStart=%h/PersonenZ-hler/.venv/bin/python -m visitor_counter.app --project-root %h/PersonenZ-hler
+ExecStop=/usr/bin/touch %h/PersonenZ-hler/logs/visitor_counter.stop
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,9 @@
+numpy>=1.24
+opencv-python>=4.8
+psutil>=5.9
+PySide6>=6.6
+PyYAML>=6.0
+pytest>=8.0
+onnx>=1.15
+onnxruntime>=1.17
+ultralytics>=8.3

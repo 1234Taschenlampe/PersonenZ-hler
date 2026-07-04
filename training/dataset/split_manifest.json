@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Filled by training/scripts/split_dataset.py. Split by session/scenario to avoid leakage.",
+  "items": []
+}

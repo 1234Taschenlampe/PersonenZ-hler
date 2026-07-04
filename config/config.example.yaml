@@ -1,0 +1,92 @@
+cameras:
+  camera_1:
+    camera_id: camera_1
+    device: /dev/video0
+    width: 1280
+    height: 720
+    fps: 30
+    role: entrance
+    display_name: EINGANG - Kamera 1
+    line_start:
+    - 160
+    - 360
+    line_end:
+    - 1120
+    - 360
+    in_positive_side: true
+    entry_zone: near
+    exit_zone: far
+    masks: []
+  camera_2:
+    camera_id: camera_2
+    device: /dev/video2
+    width: 1280
+    height: 720
+    fps: 30
+    role: exit
+    display_name: AUSGANG - Kamera 2
+    line_start:
+    - 160
+    - 360
+    line_end:
+    - 1120
+    - 360
+    in_positive_side: true
+    entry_zone: near
+    exit_zone: far
+    masks: []
+model:
+  hef_path: models/yolo26x_person_hailo10h_640.hef
+  model_name: YOLO26x COCO Detection HAILO10H (person filter)
+  target_model_name: YOLO26x COCO Detection HAILO10H (person filter)
+  target_hef_path: models/yolo26x_person_hailo10h_640.hef
+  detector_candidates:
+  - name: YOLO26x COCO Detection HAILO10H (person filter)
+    path: models/yolo26x_person_hailo10h_640.hef
+    role: required_runtime
+  - name: YOLO11x Detection HAILO10H
+    path: models/yolo11x_hailo10h.hef
+    role: manual_rollback_only
+  - name: YOLO11l Detection HAILO10H
+    path: models/yolo11l_hailo10h.hef
+    role: comparison_only
+  - name: YOLO11m Detection HAILO10H
+    path: models/yolov11m_h10.hef
+    role: forbidden_fallback
+  reid_model_name: OSNet x1.0 HAILO10H
+  reid_hef_path: models/osnet_x1_0_hailo10h.hef
+  reid_required: true
+  postprocess_onnx_path: ''
+  postprocess_config_path: ''
+  output_format: yolo26_detection
+  model_type: Detection
+  input_size: 640
+  confidence_threshold: 0.2
+  iou_threshold: 0.6
+  max_detections: 300
+  allow_fallback: false
+  require_custom_yolo26x: true
+  detector_fallback_enabled: false
+tracking:
+  tracker: bytetrack
+  max_lost_frames: 20
+  min_hits_before_counting: 2
+  iou_match_threshold: 0.2
+identity:
+  match_window_seconds: 3.0
+  stale_seconds: 2.0
+  reid_threshold: 0.62
+  hysteresis_seconds: 1.5
+consensus:
+  enabled: true
+  transition_window_seconds: 3.0
+  uncertain_window_seconds: 6.0
+  expected_travel_seconds: 1.5
+  bbox_area_ratio_tolerance: 0.7
+  event_lock_seconds: 8.0
+timeout:
+  presence_timeout_enabled: true
+  presence_timeout_minutes: 60
+database:
+  path: data/person_counter.sqlite3
+  store_video_frames: false

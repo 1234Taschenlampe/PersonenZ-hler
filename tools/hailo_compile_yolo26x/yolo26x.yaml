@@ -1,0 +1,16 @@
+network:
+  network_name: yolo26x
+  paths:
+    network_path:
+      - models/yolo26x.onnx
+  parser:
+    nodes:
+      - null
+      - null
+info:
+  input_shape: 640x640x3
+  classes: 80
+  target: hailo10h
+postprocessing:
+  device_pre_post_layers:
+    nms: false

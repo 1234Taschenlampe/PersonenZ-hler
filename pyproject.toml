@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visitor-counter"
+version = "0.1.0"
+description = "Dual-camera YOLO26x Hailo visitor counter for Raspberry Pi"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "psutil>=5.9",
+  "PySide6>=6.6",
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+visitor-counter = "visitor_counter.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q -m 'not hardware'"
+markers = [
+  "hardware: requires Raspberry Pi cameras, HailoRT and compiled HEF",
+]

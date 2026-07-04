@@ -1,0 +1,13 @@
+# Lock this file on the x86-64 training host after environment creation.
+# Baseline package targets; exact versions must be filled by `pip freeze`.
+ultralytics
+torch
+torchvision
+onnx
+onnxruntime
+onnxsim
+opencv-python
+numpy
+PyYAML
+tqdm
+Pillow

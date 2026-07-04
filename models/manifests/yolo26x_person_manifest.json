@@ -1,0 +1,17 @@
+{
+  "model_name": "YOLO26x COCO",
+  "target_hef": "models/yolo26x_person_hailo10h_640.hef",
+  "class_filter": {
+    "0": "person"
+  },
+  "source_class_count": 80,
+  "architecture": "HAILO10H",
+  "status": "not_compiled",
+  "fallback_policy": "Fail closed in production; do not use YOLO11x or any CPU/runtime fallback as a silent replacement.",
+  "artifacts": {
+    "weights": "models/yolo26x.pt",
+    "weights_sha256": "9fdd44a31c504547ffb81d2c6d9e6dac3493c8eaa8b0398d3f43bae6c7003e92",
+    "onnx": "models/yolo26x_640.onnx",
+    "onnx_sha256": "da07f5308b5392fc5a570acabd4ee2400ac57075e5255d6f2d251ddb5acb8aae"
+  }
+}

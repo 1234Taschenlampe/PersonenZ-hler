@@ -1,0 +1,7 @@
+path: /home/raspibob/person_dataset_curated
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: person
+nc: 1
