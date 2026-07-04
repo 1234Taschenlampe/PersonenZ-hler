@@ -55,17 +55,18 @@ class EventDatabase:
         tables = {row[0] for row in cursor.fetchall()}
         
         schema_version = 0
-        if "app_settings" in tables:
+        if "presence_sessions" in tables:
+            columns = {row[1] for row in self._connection.execute("PRAGMA table_info(presence_sessions)").fetchall()}
+            if "id" in columns and "session_id" not in columns:
+                schema_version = 1
+        
+        if schema_version == 0 and "app_settings" in tables:
             try:
                 row = self._connection.execute("SELECT value FROM app_settings WHERE key = 'schema_version'").fetchone()
                 if row:
                     schema_version = int(row[0])
             except sqlite3.OperationalError:
                 pass
-        elif "presence_sessions" in tables:
-            columns = {row[1] for row in self._connection.execute("PRAGMA table_info(presence_sessions)").fetchall()}
-            if "id" in columns and "session_id" not in columns:
-                schema_version = 1
 
         # Backup the database file if migrating from version 1
         if self.path.exists() and schema_version == 1:
