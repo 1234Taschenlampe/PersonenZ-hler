@@ -149,6 +149,16 @@ data class ConnectionState(
     val lastError: String? = null,
 )
 
+data class DeviceNetworkState(
+    val available: Boolean = false,
+    val validated: Boolean = false,
+    val transport: String = "N/A",
+    val ssid: String? = null,
+    val bssid: String? = null,
+    val ipAddress: String? = null,
+    val lastChangedMillis: Long? = null,
+)
+
 data class DiscoveredServerInfo(
     val name: String,
     val host: String,
@@ -160,6 +170,7 @@ data class MobileUiState(
     val status: ServerStatus? = null,
     val events: List<EventItem> = emptyList(),
     val connection: ConnectionState = ConnectionState(),
+    val network: DeviceNetworkState = DeviceNetworkState(),
     val selectedFilter: EventFilter = EventFilter.All,
     val discoveredServers: List<DiscoveredServerInfo> = emptyList(),
     val discoveryActive: Boolean = false,

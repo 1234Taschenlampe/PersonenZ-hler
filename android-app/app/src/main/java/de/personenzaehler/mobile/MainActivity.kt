@@ -78,6 +78,7 @@ import de.personenzaehler.mobile.data.EventItem
 import de.personenzaehler.mobile.data.MobileUiState
 import de.personenzaehler.mobile.data.ServerSettings
 import de.personenzaehler.mobile.data.ServerStatus
+import de.personenzaehler.mobile.network.NetworkMonitor
 import de.personenzaehler.mobile.network.PiApiClient
 import de.personenzaehler.mobile.network.ServerDiscovery
 import de.personenzaehler.mobile.notifications.AlertNotifier
@@ -103,6 +104,7 @@ class MainActivity : ComponentActivity() {
                         tokenStore = tokenStore,
                         apiClient = PiApiClient(tokenStore),
                         serverDiscovery = ServerDiscovery(context),
+                        networkMonitor = NetworkMonitor(context),
                         notifier = AlertNotifier(context),
                     ),
                 )
@@ -259,6 +261,8 @@ private fun StatusBanner(state: MobileUiState) {
             Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
             Text("HTTP: ${state.connection.httpStatus ?: "N/A"} | Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
             Text("Letzte Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+            Text("Handy-Netz: ${state.network.transport} ${state.network.ssid ?: ""} ${state.network.ipAddress ?: ""}".trim())
+            state.network.bssid?.let { Text("Access Point: $it") }
             state.connection.lastError?.let { Text("Fehler: $it", color = MaterialTheme.colorScheme.error) }
         }
     }
@@ -357,6 +361,8 @@ private fun SystemScreen(status: ServerStatus?, state: MobileUiState) {
                     "DB-Groesse" to formatBytes(status?.database?.sizeBytes),
                     "REST-Status" to if (state.connection.restConnected) "OK" else "Offline",
                     "WebSocket" to if (state.connection.webSocketConnected) "OK" else "nicht verfuegbar",
+                    "Handy-Netz" to listOfNotNull(state.network.transport, state.network.ssid, state.network.ipAddress).joinToString(" ").ifBlank { "N/A" },
+                    "Access Point" to (state.network.bssid ?: "N/A"),
                     "Git-Commit" to (status?.version?.gitCommit ?: "N/A"),
                     "Hailo erkannt" to when (status?.hailo?.deviceDetected) { true -> "ja"; false -> "nein"; null -> "N/A" },
                     "Modell geladen" to when (status?.detector?.active) { true -> "ja"; false -> "nein"; null -> "N/A" },
@@ -451,6 +457,9 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
         Text("HTTP-Status: ${state.connection.httpStatus ?: "N/A"}")
         Text("Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
         Text("Letzte erfolgreiche Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+        Text("Handy-Netz: ${state.network.transport} | verfuegbar=${state.network.available} | validiert=${state.network.validated}")
+        Text("SSID: ${state.network.ssid ?: "N/A"} | BSSID: ${state.network.bssid ?: "N/A"}")
+        Text("Handy-IP: ${state.network.ipAddress ?: "N/A"}")
         state.connection.lastError?.let { Text("Letzter Fehler: $it", color = MaterialTheme.colorScheme.error) }
         Text("App-Version: ${state.appVersionText}")
         Text("Serverversion: ${state.serverVersionText}")

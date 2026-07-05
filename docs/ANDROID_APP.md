@@ -33,6 +33,8 @@ http://<pi-ip-oder-hostname>:8766/api/v1/status
 
 Die Android-App nutzt keine feste IP-Adresse. In den Einstellungen koennen `http`, `personenzaehler.local` oder die aktuelle Pi-IP und Port `8766` gespeichert werden. Die App zeigt REST-Status, WebSocket-Status, Endpunkt, HTTP-Code, Antwortzeit, letzte erfolgreiche Aktualisierung und konkrete Fehler getrennt an. Wenn WebSocket nicht verfuegbar ist, bleibt REST-Polling aktiv.
 
+Fuer WLAN-Roaming beobachtet die App das Android-Default-Netzwerk. Nach einem Access-Point- oder IP-Wechsel startet sie die REST-Verbindung automatisch neu. Einzelne verlorene Requests werden als kurze Unterbrechung angezeigt; erst mehrere Fehlschlaege oder laengere Funkstille setzen REST wirklich auf getrennt. In Dashboard und Einstellungen werden Handy-Netz, IP und Access Point angezeigt.
+
 ## Build
 
 ```powershell

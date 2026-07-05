@@ -8,6 +8,7 @@ import de.personenzaehler.mobile.data.EventFilter
 import de.personenzaehler.mobile.data.MobileUiState
 import de.personenzaehler.mobile.data.ServerSettings
 import de.personenzaehler.mobile.data.ServerStatus
+import de.personenzaehler.mobile.network.NetworkMonitor
 import de.personenzaehler.mobile.network.PiApiClient
 import de.personenzaehler.mobile.network.ReconnectBackoff
 import de.personenzaehler.mobile.network.RestResponse
@@ -32,6 +33,7 @@ class MainViewModel(
     private val tokenStore: SecureTokenStore,
     private val apiClient: PiApiClient,
     private val serverDiscovery: ServerDiscovery,
+    private val networkMonitor: NetworkMonitor,
     private val notifier: AlertNotifier,
 ) : ViewModel() {
     private val _state = MutableStateFlow(MobileUiState())
@@ -40,13 +42,38 @@ class MainViewModel(
     private val backoff = ReconnectBackoff()
     private var pollJob: Job? = null
     private var discoveryJob: Job? = null
+    private var reconnectJob: Job? = null
     private var webSocket: WebSocket? = null
+    private var consecutiveFailures = 0
 
     init {
         viewModelScope.launch {
             settingsRepository.settings.collectLatest { settings ->
                 _state.update { it.copy(settings = settings) }
                 restartPolling(settings)
+            }
+        }
+        viewModelScope.launch {
+            networkMonitor.states().collectLatest { network ->
+                _state.update { it.copy(network = network) }
+                val settings = _state.value.settings
+                if (network.available && settings.configured) {
+                    reconnectJob?.cancel()
+                    reconnectJob = launch {
+                        delay(400L)
+                        reconnectNow(settings)
+                    }
+                } else if (!network.available) {
+                    _state.update {
+                        it.copy(
+                            connection = it.connection.copy(
+                                stale = true,
+                                message = "WLAN kurz weg, warte auf Wiederverbindung",
+                                lastError = "Android meldet kein nutzbares Netzwerk",
+                            ),
+                        )
+                    }
+                }
             }
         }
     }
@@ -123,6 +150,12 @@ class MainViewModel(
         }
     }
 
+    private suspend fun reconnectNow(settings: ServerSettings) {
+        webSocket?.cancel()
+        if (settings.webSocketEnabled) openWebSocket(settings)
+        fetchOnce(settings, manual = false)
+    }
+
     private fun openWebSocket(settings: ServerSettings) {
         webSocket = apiClient.openLiveSocket(
             settings,
@@ -161,21 +194,30 @@ class MainViewModel(
             val events = runCatching { apiClient.fetchEvents(settings, 100) }.getOrDefault(emptyList())
             response to events
         }.onSuccess { (response, events) ->
+            consecutiveFailures = 0
             backoff.reset()
             applyRestStatus(response, "REST verbunden", webSocketConnected = _state.value.connection.webSocketConnected)
             _state.update { it.copy(events = events, busy = false) }
             notifier.evaluate(response.value, settings, serverOnline = true)
         }.onFailure { throwable ->
+            consecutiveFailures += 1
             val delayMillis = backoff.nextDelayMillis()
+            val lastSuccess = _state.value.connection.lastSuccessMillis
+            val now = System.currentTimeMillis()
+            val graceMillis = maxOf(30_000L, settings.refreshSeconds.coerceAtLeast(1) * 4_000L)
+            val recentlyHealthy = lastSuccess != null && now - lastSuccess <= graceMillis
+            val hardOffline = manual || !recentlyHealthy || consecutiveFailures >= 3
+            val error = throwable.message ?: "Keine Verbindung zum Server"
             _state.update {
                 it.copy(
                     busy = false,
                     connection = it.connection.copy(
-                        online = false,
-                        restConnected = false,
+                        online = if (hardOffline) false else it.connection.online,
+                        restConnected = if (hardOffline) false else it.connection.restConnected,
                         stale = true,
-                        message = throwable.message ?: "Keine Verbindung zum Server",
-                        lastError = throwable.message ?: "Keine Verbindung zum Server",
+                        message = if (hardOffline) "Keine Verbindung zum Server" else "REST kurz unterbrochen, verbinde neu",
+                        webSocketConnected = false,
+                        lastError = error,
                     ),
                 )
             }
@@ -218,6 +260,7 @@ class MainViewModel(
 
     override fun onCleared() {
         discoveryJob?.cancel()
+        reconnectJob?.cancel()
         webSocket?.cancel()
         super.onCleared()
     }
@@ -228,10 +271,11 @@ class MainViewModelFactory(
     private val tokenStore: SecureTokenStore,
     private val apiClient: PiApiClient,
     private val serverDiscovery: ServerDiscovery,
+    private val networkMonitor: NetworkMonitor,
     private val notifier: AlertNotifier,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return MainViewModel(settingsRepository, tokenStore, apiClient, serverDiscovery, notifier) as T
+        return MainViewModel(settingsRepository, tokenStore, apiClient, serverDiscovery, networkMonitor, notifier) as T
     }
 }
