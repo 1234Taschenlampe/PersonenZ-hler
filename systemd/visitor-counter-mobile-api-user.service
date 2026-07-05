@@ -1,0 +1,14 @@
+[Unit]
+Description=Visitor Counter Mobile Status API
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/raspibob/PersonenZ-hler
+Environment=PYTHONPATH=/home/raspibob/PersonenZ-hler/src
+ExecStart=/home/raspibob/PersonenZ-hler/.venv/bin/python scripts/status_api.py --project-root /home/raspibob/PersonenZ-hler --host 0.0.0.0 --port 8766
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
