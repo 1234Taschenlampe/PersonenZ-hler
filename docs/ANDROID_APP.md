@@ -16,7 +16,7 @@ GET /api/v1/cameras
 GET /api/v1/events
 ```
 
-Wenn der vorhandene Systemdienst noch auf `127.0.0.1:8765` gebunden ist und kein sudo zur Verfuegung steht, kann der User-Service fuer die App genutzt werden:
+Die API muss direkt im lokalen WLAN auf `0.0.0.0:8766` lauschen. Der User-Service startet sie dauerhaft auf diesem Port:
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -30,6 +30,8 @@ Danach ist die API im lokalen WLAN erreichbar:
 ```text
 http://<pi-ip-oder-hostname>:8766/api/v1/status
 ```
+
+Die Android-App nutzt keine feste IP-Adresse. In den Einstellungen koennen `http`, `personenzaehler.local` oder die aktuelle Pi-IP und Port `8766` gespeichert werden. Die App zeigt REST-Status, WebSocket-Status, Endpunkt, HTTP-Code, Antwortzeit, letzte erfolgreiche Aktualisierung und konkrete Fehler getrennt an. Wenn WebSocket nicht verfuegbar ist, bleibt REST-Polling aktiv.
 
 ## Build
 

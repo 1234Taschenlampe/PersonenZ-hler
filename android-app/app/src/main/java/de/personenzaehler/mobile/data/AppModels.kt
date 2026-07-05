@@ -3,7 +3,7 @@ package de.personenzaehler.mobile.data
 data class ServerSettings(
     val scheme: String = "http",
     val host: String = "",
-    val port: Int = 8765,
+    val port: Int = 8766,
     val refreshSeconds: Int = 5,
     val webSocketEnabled: Boolean = true,
     val notificationsEnabled: Boolean = true,
@@ -138,10 +138,21 @@ enum class EventFilter(val label: String) {
 
 data class ConnectionState(
     val online: Boolean = false,
+    val restConnected: Boolean = false,
     val stale: Boolean = false,
     val message: String = "Keine Verbindung zum Server",
     val lastSuccessMillis: Long? = null,
     val webSocketConnected: Boolean = false,
+    val endpoint: String? = null,
+    val httpStatus: Int? = null,
+    val responseTimeMs: Long? = null,
+    val lastError: String? = null,
+)
+
+data class DiscoveredServerInfo(
+    val name: String,
+    val host: String,
+    val port: Int,
 )
 
 data class MobileUiState(
@@ -150,6 +161,8 @@ data class MobileUiState(
     val events: List<EventItem> = emptyList(),
     val connection: ConnectionState = ConnectionState(),
     val selectedFilter: EventFilter = EventFilter.All,
+    val discoveredServers: List<DiscoveredServerInfo> = emptyList(),
+    val discoveryActive: Boolean = false,
     val serverVersionText: String = "N/A",
     val appVersionText: String = "0.1.0",
     val busy: Boolean = false,

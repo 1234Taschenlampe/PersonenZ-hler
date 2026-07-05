@@ -22,7 +22,7 @@ class SettingsRepository(context: Context) {
         ServerSettings(
             scheme = prefs[Keys.Scheme] ?: "http",
             host = prefs[Keys.Host] ?: "",
-            port = prefs[Keys.Port] ?: 8765,
+            port = prefs[Keys.Port] ?: 8766,
             refreshSeconds = prefs[Keys.RefreshSeconds] ?: 5,
             webSocketEnabled = prefs[Keys.WebSocketEnabled] ?: true,
             notificationsEnabled = prefs[Keys.NotificationsEnabled] ?: true,

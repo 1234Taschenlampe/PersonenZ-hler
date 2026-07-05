@@ -17,6 +17,13 @@ import okhttp3.WebSocketListener
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+data class RestResponse<T>(
+    val value: T,
+    val endpoint: String,
+    val httpStatus: Int,
+    val responseTimeMs: Long,
+)
+
 class PiApiClient(
     private val tokenStore: SecureTokenStore,
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -27,16 +34,25 @@ class PiApiClient(
         .build(),
 ) {
     suspend fun fetchStatus(settings: ServerSettings): ServerStatus = withContext(Dispatchers.IO) {
+        fetchStatusWithMeta(settings).value
+    }
+
+    suspend fun fetchStatusWithMeta(settings: ServerSettings): RestResponse<ServerStatus> = withContext(Dispatchers.IO) {
         ensureAllowed(settings)
         val primary = runCatching { get(settings, "/api/v1/status") }
-        val body = primary.getOrElse { get(settings, "/status") }
-        StatusParser.parseStatus(body)
+        val response = primary.getOrElse { get(settings, "/status") }
+        RestResponse(
+            value = StatusParser.parseStatus(response.body),
+            endpoint = response.endpoint,
+            httpStatus = response.httpStatus,
+            responseTimeMs = response.responseTimeMs,
+        )
     }
 
     suspend fun fetchEvents(settings: ServerSettings, limit: Int = 100): List<EventItem> = withContext(Dispatchers.IO) {
         ensureAllowed(settings)
-        val body = get(settings, "/api/v1/events?limit=${limit.coerceIn(1, 200)}")
-        StatusParser.parseEvents(body)
+        val response = get(settings, "/api/v1/events?limit=${limit.coerceIn(1, 200)}")
+        StatusParser.parseEvents(response.body)
     }
 
     fun openLiveSocket(
@@ -76,12 +92,30 @@ class PiApiClient(
         }
     }
 
-    private fun get(settings: ServerSettings, path: String): String {
-        val request = requestBuilder(settings.baseUrl + path).build()
+    private data class RawResponse(
+        val body: String,
+        val endpoint: String,
+        val httpStatus: Int,
+        val responseTimeMs: Long,
+    )
+
+    private fun get(settings: ServerSettings, path: String): RawResponse {
+        val endpoint = settings.baseUrl + path
+        val request = requestBuilder(endpoint).build()
+        val started = System.nanoTime()
         client.newCall(request).execute().use { response ->
+            val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started).coerceAtLeast(0)
             val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException("HTTP ${response.code} von $endpoint")
+            }
             if (body.isBlank()) throw IOException("Leere Serverantwort")
-            return body
+            return RawResponse(
+                body = body,
+                endpoint = endpoint,
+                httpStatus = response.code,
+                responseTimeMs = elapsed,
+            )
         }
     }
 

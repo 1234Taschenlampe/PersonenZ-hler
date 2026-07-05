@@ -79,6 +79,7 @@ import de.personenzaehler.mobile.data.MobileUiState
 import de.personenzaehler.mobile.data.ServerSettings
 import de.personenzaehler.mobile.data.ServerStatus
 import de.personenzaehler.mobile.network.PiApiClient
+import de.personenzaehler.mobile.network.ServerDiscovery
 import de.personenzaehler.mobile.notifications.AlertNotifier
 import de.personenzaehler.mobile.settings.SecureTokenStore
 import de.personenzaehler.mobile.settings.SettingsRepository
@@ -101,6 +102,7 @@ class MainActivity : ComponentActivity() {
                         settingsRepository = SettingsRepository(context),
                         tokenStore = tokenStore,
                         apiClient = PiApiClient(tokenStore),
+                        serverDiscovery = ServerDiscovery(context),
                         notifier = AlertNotifier(context),
                     ),
                 )
@@ -112,7 +114,7 @@ class MainActivity : ComponentActivity() {
                             state.settings.copy(
                                 scheme = launchIntent.getStringExtra("server_scheme") ?: "http",
                                 host = host,
-                                port = launchIntent.getIntExtra("server_port", 8765),
+                                port = launchIntent.getIntExtra("server_port", 8766),
                             ),
                         )
                     }
@@ -163,9 +165,9 @@ private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
                     Column {
                         Text("Personenzaehler")
                         Text(
-                            text = if (state.connection.online) state.connection.message else "Keine Verbindung zum Server",
+                            text = if (state.connection.restConnected) "REST verbunden" else "REST getrennt",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (state.connection.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            color = if (state.connection.restConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                         )
                     }
                 },
@@ -244,15 +246,20 @@ private fun DashboardScreen(state: MobileUiState) {
 @Composable
 private fun StatusBanner(state: MobileUiState) {
     val color = when {
-        !state.connection.online -> MaterialTheme.colorScheme.errorContainer
+        !state.connection.restConnected -> MaterialTheme.colorScheme.errorContainer
         state.connection.stale -> MaterialTheme.colorScheme.tertiaryContainer
         else -> MaterialTheme.colorScheme.secondaryContainer
     }
     Card(colors = CardDefaults.cardColors(containerColor = color)) {
         Column(Modifier.padding(14.dp)) {
-            Text(if (state.connection.online) "Server verbunden" else "Keine Verbindung zum Server", fontWeight = FontWeight.Bold)
+            Text(if (state.connection.restConnected) "Server verbunden" else "Keine Verbindung zum Server", fontWeight = FontWeight.Bold)
             Text(state.connection.message)
-            Text("WebSocket: ${if (state.connection.webSocketConnected) "verbunden" else "nicht verbunden"}")
+            Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
+            Text("WebSocket: ${if (state.connection.webSocketConnected) "verbunden" else "nicht verfuegbar"}")
+            Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
+            Text("HTTP: ${state.connection.httpStatus ?: "N/A"} | Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
+            Text("Letzte Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+            state.connection.lastError?.let { Text("Fehler: $it", color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -348,7 +355,8 @@ private fun SystemScreen(status: ServerStatus?, state: MobileUiState) {
                     "Load Average" to status?.host?.loadAverage?.joinToString(", ") { formatDouble(it) }.orEmpty().ifBlank { "N/A" },
                     "System-Uptime" to formatDuration(status?.host?.systemUptimeSeconds),
                     "DB-Groesse" to formatBytes(status?.database?.sizeBytes),
-                    "API-Status" to if (state.connection.online) "OK" else "Offline",
+                    "REST-Status" to if (state.connection.restConnected) "OK" else "Offline",
+                    "WebSocket" to if (state.connection.webSocketConnected) "OK" else "nicht verfuegbar",
                     "Git-Commit" to (status?.version?.gitCommit ?: "N/A"),
                     "Hailo erkannt" to when (status?.hailo?.deviceDetected) { true -> "ja"; false -> "nein"; null -> "N/A" },
                     "Modell geladen" to when (status?.detector?.active) { true -> "ja"; false -> "nein"; null -> "N/A" },
@@ -400,7 +408,7 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
                 val settings = ServerSettings(
                     scheme = if (scheme == "https") "https" else "http",
                     host = host,
-                    port = port.toIntOrNull() ?: 8765,
+                    port = port.toIntOrNull() ?: 8766,
                     refreshSeconds = refresh.toIntOrNull() ?: 5,
                     webSocketEnabled = ws,
                     notificationsEnabled = notifications,
@@ -415,11 +423,35 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
             }
             OutlinedButton(onClick = viewModel::testConnection) { Text("Verbindung testen") }
         }
+        OutlinedButton(onClick = viewModel::discoverServers) {
+            Text(if (state.discoveryActive) "Suche laeuft..." else "Server automatisch suchen")
+        }
+        if (state.discoveredServers.isNotEmpty()) {
+            Text("Gefundene Server")
+            state.discoveredServers.forEach { server ->
+                AssistChip(
+                    onClick = {
+                        host = server.host
+                        port = server.port.toString()
+                        scheme = "http"
+                        viewModel.useDiscoveredServer(server)
+                    },
+                    label = { Text("${server.name} | ${server.host}:${server.port}") },
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = viewModel::clearToken) { Text("Token entfernen") }
             OutlinedButton(onClick = viewModel::clearLocalData) { Text("Lokale Daten loeschen") }
         }
         Divider()
+        Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
+        Text("WebSocket: ${if (state.connection.webSocketConnected) "verbunden" else "nicht verfuegbar"}")
+        Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
+        Text("HTTP-Status: ${state.connection.httpStatus ?: "N/A"}")
+        Text("Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
+        Text("Letzte erfolgreiche Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+        state.connection.lastError?.let { Text("Letzter Fehler: $it", color = MaterialTheme.colorScheme.error) }
         Text("App-Version: ${state.appVersionText}")
         Text("Serverversion: ${state.serverVersionText}")
         Text("Pairing: Der aktuelle Server meldet kein vollstaendiges Pairing-Verfahren. Die App speichert optionale Bearer Tokens sicher und sendet sie mit, sobald der Server sie auswertet.")

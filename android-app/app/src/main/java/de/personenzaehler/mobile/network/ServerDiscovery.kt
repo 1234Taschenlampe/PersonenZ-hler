@@ -1,6 +1,7 @@
 package de.personenzaehler.mobile.network
 
 import android.content.Context
+import android.net.wifi.WifiManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import kotlinx.coroutines.channels.awaitClose
@@ -11,8 +12,13 @@ data class DiscoveredServer(val name: String, val host: String, val port: Int)
 
 class ServerDiscovery(context: Context) {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
 
     fun discover(): Flow<DiscoveredServer> = callbackFlow {
+        val multicastLock = wifiManager?.createMulticastLock("personenzaehler-nsd").also {
+            it?.setReferenceCounted(false)
+            it?.acquire()
+        }
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) = Unit
             override fun onDiscoveryStopped(serviceType: String) = Unit
@@ -22,6 +28,7 @@ class ServerDiscovery(context: Context) {
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
             override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                if (serviceInfo.serviceType != "_http._tcp.") return
                 nsdManager.resolveService(
                     serviceInfo,
                     object : NsdManager.ResolveListener {
@@ -35,6 +42,9 @@ class ServerDiscovery(context: Context) {
             }
         }
         nsdManager.discoverServices("_http._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
-        awaitClose { runCatching { nsdManager.stopServiceDiscovery(listener) } }
+        awaitClose {
+            runCatching { nsdManager.stopServiceDiscovery(listener) }
+            runCatching { multicastLock?.release() }
+        }
     }
 }
