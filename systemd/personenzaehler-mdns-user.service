@@ -1,0 +1,13 @@
+[Unit]
+Description=Publish PersonenZaehler mobile API via mDNS
+After=network-online.target visitor-counter-mobile-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/avahi-publish-service personenzaehler _personenzaehler._tcp 8766
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

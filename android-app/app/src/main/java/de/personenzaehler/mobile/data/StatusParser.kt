@@ -16,6 +16,7 @@ object StatusParser {
             detector = parseDetector(json.optJSONObject("detector")),
             reid = parseReid(json.optJSONObject("reid")),
             hailo = parseHailo(json.optJSONObject("hailo")),
+            runtime = parseRuntime(json.optJSONObject("runtime")),
             host = parseHost(json.optJSONObject("host")),
             database = parseDatabase(json.optJSONObject("database")),
         )
@@ -112,6 +113,17 @@ object StatusParser {
         architecture = json?.optStringOrNull("architecture"),
         scan = json?.optStringOrNull("scan"),
         identify = json?.optStringOrNull("identify"),
+    )
+
+    private fun parseRuntime(json: JSONObject?) = RuntimeInfo(
+        activeHef = json?.optStringOrNull("active_hef"),
+        hailoInferenceCount = json?.optLongOrNull("hailo_inference_count"),
+        inferenceFps = json?.optDoubleOrNull("inference_fps"),
+        hailoLatencyMs = json?.optDoubleOrNull("hailo_latency_ms"),
+        totalLatencyMs = json?.optDoubleOrNull("total_latency_ms"),
+        frameAgeMs = json?.optDoubleOrNull("frame_age_ms"),
+        queueLength = json?.optIntOrNull("queue_length"),
+        hailoStatus = json?.optStringOrNull("hailo_status"),
     )
 
     private fun parseHost(json: JSONObject?) = HostTelemetry(

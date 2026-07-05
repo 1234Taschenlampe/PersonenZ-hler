@@ -26,6 +26,7 @@ class SettingsRepository(context: Context) {
             refreshSeconds = prefs[Keys.RefreshSeconds] ?: 5,
             webSocketEnabled = prefs[Keys.WebSocketEnabled] ?: true,
             notificationsEnabled = prefs[Keys.NotificationsEnabled] ?: true,
+            serverOfflineWarnSeconds = prefs[Keys.ServerOfflineWarnSeconds] ?: 30,
             temperatureLimitC = prefs[Keys.TemperatureLimitC] ?: 75.0,
             cameraOfflineWarnSeconds = prefs[Keys.CameraOfflineWarnSeconds] ?: 60,
             uncertainWarnLimit = prefs[Keys.UncertainWarnLimit] ?: 5,
@@ -40,6 +41,7 @@ class SettingsRepository(context: Context) {
             prefs[Keys.RefreshSeconds] = settings.refreshSeconds.coerceIn(1, 300)
             prefs[Keys.WebSocketEnabled] = settings.webSocketEnabled
             prefs[Keys.NotificationsEnabled] = settings.notificationsEnabled
+            prefs[Keys.ServerOfflineWarnSeconds] = settings.serverOfflineWarnSeconds.coerceIn(5, 3600)
             prefs[Keys.TemperatureLimitC] = settings.temperatureLimitC
             prefs[Keys.CameraOfflineWarnSeconds] = settings.cameraOfflineWarnSeconds.coerceAtLeast(5)
             prefs[Keys.UncertainWarnLimit] = settings.uncertainWarnLimit.coerceAtLeast(1)
@@ -57,6 +59,7 @@ class SettingsRepository(context: Context) {
         val RefreshSeconds = intPreferencesKey("refresh_seconds")
         val WebSocketEnabled = booleanPreferencesKey("websocket_enabled")
         val NotificationsEnabled = booleanPreferencesKey("notifications_enabled")
+        val ServerOfflineWarnSeconds = intPreferencesKey("server_offline_warn_seconds")
         val TemperatureLimitC = doublePreferencesKey("temperature_limit_c")
         val CameraOfflineWarnSeconds = intPreferencesKey("camera_offline_warn_seconds")
         val UncertainWarnLimit = intPreferencesKey("uncertain_warn_limit")

@@ -7,6 +7,7 @@ data class ServerSettings(
     val refreshSeconds: Int = 5,
     val webSocketEnabled: Boolean = true,
     val notificationsEnabled: Boolean = true,
+    val serverOfflineWarnSeconds: Int = 30,
     val temperatureLimitC: Double = 75.0,
     val cameraOfflineWarnSeconds: Int = 60,
     val uncertainWarnLimit: Int = 5,
@@ -25,6 +26,7 @@ data class ServerStatus(
     val detector: DetectorInfo,
     val reid: ReIdInfo,
     val hailo: HailoInfo,
+    val runtime: RuntimeInfo,
     val host: HostTelemetry,
     val database: DatabaseInfo,
 )
@@ -98,6 +100,23 @@ data class HailoInfo(
     val identify: String?,
 )
 
+data class RuntimeInfo(
+    val activeHef: String?,
+    val hailoInferenceCount: Long?,
+    val inferenceFps: Double?,
+    val hailoLatencyMs: Double?,
+    val totalLatencyMs: Double?,
+    val frameAgeMs: Double?,
+    val queueLength: Int?,
+    val hailoStatus: String?,
+) {
+    val modelLoaded: Boolean?
+        get() = activeHef?.takeIf { it.isNotBlank() }?.let { true }
+
+    val inferenceActive: Boolean?
+        get() = inferenceFps?.let { it > 0.0 } ?: hailoInferenceCount?.let { it > 0L }
+}
+
 data class HostTelemetry(
     val cpuPercent: Double?,
     val ramPercent: Double?,
@@ -140,13 +159,16 @@ data class ConnectionState(
     val online: Boolean = false,
     val restConnected: Boolean = false,
     val stale: Boolean = false,
-    val message: String = "Keine Verbindung zum Server",
+    val message: String = "REST noch nicht verbunden",
     val lastSuccessMillis: Long? = null,
     val webSocketConnected: Boolean = false,
+    val webSocketStatus: String = "getrennt",
+    val webSocketLastSuccessMillis: Long? = null,
     val endpoint: String? = null,
     val httpStatus: Int? = null,
     val responseTimeMs: Long? = null,
     val lastError: String? = null,
+    val webSocketError: String? = null,
 )
 
 data class DeviceNetworkState(

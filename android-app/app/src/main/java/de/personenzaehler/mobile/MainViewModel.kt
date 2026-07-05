@@ -8,6 +8,7 @@ import de.personenzaehler.mobile.data.EventFilter
 import de.personenzaehler.mobile.data.MobileUiState
 import de.personenzaehler.mobile.data.ServerSettings
 import de.personenzaehler.mobile.data.ServerStatus
+import de.personenzaehler.mobile.network.LiveSocketState
 import de.personenzaehler.mobile.network.NetworkMonitor
 import de.personenzaehler.mobile.network.PiApiClient
 import de.personenzaehler.mobile.network.ReconnectBackoff
@@ -79,6 +80,8 @@ class MainViewModel(
     }
 
     fun saveSettings(settings: ServerSettings) {
+        _state.update { it.copy(settings = settings) }
+        restartPolling(settings)
         viewModelScope.launch { settingsRepository.save(settings) }
     }
 
@@ -145,7 +148,12 @@ class MainViewModel(
                     settings.refreshSeconds.coerceAtLeast(1) * 3_000L,
                 )
                 _state.update { state -> state.copy(connection = state.connection.copy(stale = stale)) }
-                delay(settings.refreshSeconds.coerceAtLeast(1) * 1000L)
+                val pollSeconds = if (_state.value.connection.webSocketConnected) {
+                    settings.refreshSeconds.coerceIn(5, 60)
+                } else {
+                    1
+                }
+                delay(pollSeconds * 1000L)
             }
         }
     }
@@ -159,14 +167,14 @@ class MainViewModel(
     private fun openWebSocket(settings: ServerSettings) {
         webSocket = apiClient.openLiveSocket(
             settings,
-            onStatus = { status -> applyStatus(status, "Live verbunden", webSocketConnected = true) },
-            onState = { connected, message ->
+            onStatus = { status -> applyWebSocketStatus(status) },
+            onState = { socketState, message ->
                 _state.update { state ->
                     state.copy(
                         connection = state.connection.copy(
-                            webSocketConnected = connected,
-                            message = if (state.connection.restConnected) state.connection.message else message ?: state.connection.message,
-                            lastError = if (connected) state.connection.lastError else message ?: state.connection.lastError,
+                            webSocketConnected = socketState == LiveSocketState.Connected,
+                            webSocketStatus = socketState.label,
+                            webSocketError = if (socketState == LiveSocketState.Connected) null else message,
                         ),
                     )
                 }
@@ -217,6 +225,7 @@ class MainViewModel(
                         stale = true,
                         message = if (hardOffline) "Keine Verbindung zum Server" else "REST kurz unterbrochen, verbinde neu",
                         webSocketConnected = false,
+                        webSocketStatus = "getrennt",
                         lastError = error,
                     ),
                 )
@@ -253,6 +262,22 @@ class MainViewModel(
                     httpStatus = response.httpStatus,
                     responseTimeMs = response.responseTimeMs,
                     lastError = null,
+                ),
+            )
+        }
+    }
+
+    private fun applyWebSocketStatus(status: ServerStatus) {
+        val now = System.currentTimeMillis()
+        _state.update {
+            it.copy(
+                status = status,
+                serverVersionText = listOfNotNull(status.version.server, status.version.gitCommit).joinToString(" ").ifBlank { "N/A" },
+                connection = it.connection.copy(
+                    webSocketConnected = true,
+                    webSocketStatus = LiveSocketState.Connected.label,
+                    webSocketLastSuccessMillis = now,
+                    webSocketError = null,
                 ),
             )
         }

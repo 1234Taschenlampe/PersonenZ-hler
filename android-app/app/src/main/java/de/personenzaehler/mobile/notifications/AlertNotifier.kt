@@ -15,6 +15,8 @@ import de.personenzaehler.mobile.data.ServerStatus
 
 class AlertNotifier(private val context: Context) {
     private val lastSent = mutableMapOf<String, Long>()
+    private var offlineSinceMillis: Long? = null
+    private var offlineAlertSent = false
 
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -26,12 +28,22 @@ class AlertNotifier(private val context: Context) {
     fun evaluate(status: ServerStatus?, settings: ServerSettings, serverOnline: Boolean) {
         if (!settings.notificationsEnabled || !canNotify()) return
         if (!serverOnline) {
-            notifyOnce("server_offline", "Server nicht erreichbar", "Keine Verbindung zum Raspberry Pi.")
+            val now = System.currentTimeMillis()
+            val since = offlineSinceMillis ?: now.also { offlineSinceMillis = it }
+            if (!offlineAlertSent && now - since >= settings.serverOfflineWarnSeconds * 1000L) {
+                notifyOnce("server_offline", "Server nicht erreichbar", "Seit ${settings.serverOfflineWarnSeconds} Sekunden keine Verbindung zum Raspberry Pi.")
+                offlineAlertSent = true
+            }
             return
         }
+        if (offlineAlertSent) {
+            notifyOnce("server_restored", "Verbindung wiederhergestellt", "Die App erreicht den Raspberry Pi wieder.")
+        }
+        offlineSinceMillis = null
+        offlineAlertSent = false
         if (status == null) return
-        if (status.hailo.deviceDetected == false) {
-            notifyOnce("hailo_missing", "Hailo nicht verfuegbar", "Der Server meldet kein Hailo-Geraet.")
+        if (status.hailo.deviceDetected == false || status.runtime.inferenceActive == false) {
+            notifyOnce("hailo_inactive", "Hailo nicht aktiv", status.runtime.hailoStatus ?: "Der Server meldet keine aktive Hailo-Inferenz.")
         }
         val temp = status.host.temperatureC
         if (temp != null && temp >= settings.temperatureLimitC) {

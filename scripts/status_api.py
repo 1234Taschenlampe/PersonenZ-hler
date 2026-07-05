@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
+import select
 import shutil
+import socket
 import subprocess
 import sys
+import struct
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from time import time
+from time import sleep, time
 from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,50 +27,77 @@ from visitor_counter.diagnostics import read_pi_temperature_c  # noqa: E402
 from visitor_counter.model_manager import ModelManager  # noqa: E402
 from visitor_counter.reid_manager import OSNetReIDManager  # noqa: E402
 
+LIVE_STATUS_PATH = PROJECT_ROOT / "data" / "live_status.json"
+_STATUS_CACHE_LOCK = threading.Lock()
+_STATUS_CACHE: tuple[float, dict] | None = None
+
+
+def _read_live_status() -> dict | None:
+    try:
+        if not LIVE_STATUS_PATH.exists():
+            return None
+        data = json.loads(LIVE_STATUS_PATH.read_text(encoding="utf-8"))
+        age = time() - data.get("timestamp", 0)
+        if age > 10.0:
+            return None
+        return data
+    except Exception:  # noqa: BLE001
+        return None
+
 
 def build_status(project_root: Path) -> dict:
     config = load_config(project_root / "config" / "config.yaml")
     detector = ModelManager(config.model, project_root).status()
     reid = OSNetReIDManager(config.model, project_root).status(validate_hailo=False)
     db_path = project_root / config.database.path
-    counts = _counts_status(db_path)
-    cameras = [
-        {
-            "camera_id": camera.camera_id,
-            "name": camera.display_name,
-            "role": camera.role,
-            "source": "USB" if camera.device else None,
-            "device": camera.device,
-            "wanted_fps": camera.fps,
-            "width": camera.width,
-            "height": camera.height,
-            "status": "UNKNOWN",
-            "actual_fps": None,
-            "last_frame_time": None,
-            "seconds_since_last_frame": None,
-            "connected_seconds": None,
-            "reconnect_count": None,
-            "dropped_frames": None,
-            "decode_errors": None,
-            "last_error": None,
-            "visible": None,
-            "entered": None,
-            "exited": None,
-        }
-        for camera in config.cameras.values()
-    ]
+    live = _read_live_status()
+    if live:
+        counts = live.get("counts", _counts_status(db_path))
+        cameras = live.get("cameras", [])
+        runtime = live.get("runtime", {})
+    else:
+        counts = _counts_status(db_path)
+        cameras = [
+            {
+                "camera_id": camera.camera_id,
+                "name": camera.display_name,
+                "role": camera.role,
+                "source": "USB" if camera.device else None,
+                "device": camera.device,
+                "wanted_fps": camera.fps,
+                "width": camera.width,
+                "height": camera.height,
+                "status": "UNKNOWN",
+                "actual_fps": None,
+                "last_frame_time": None,
+                "seconds_since_last_frame": None,
+                "connected_seconds": None,
+                "reconnect_count": None,
+                "dropped_frames": None,
+                "decode_errors": None,
+                "last_error": None,
+                "visible": None,
+                "entered": None,
+                "exited": None,
+            }
+            for camera in config.cameras.values()
+        ]
+        runtime = {}
     return {
         "timestamp": time(),
         "service": "visitor-counter",
         "version": _version(project_root),
+        "live_data_available": live is not None,
+        "live_data_age_seconds": round(time() - live["timestamp"], 1) if live else None,
         "api": {
             "name": "visitor-counter-status-api",
             "version": "1",
             "pairing": "not_available",
-            "websocket": "not_available",
+            "websocket": "/api/v1/ws/live",
         },
         "counts": counts,
         "cameras": cameras,
+        "runtime": runtime,
         "detector": {
             "configured_model": config.model.model_name,
             "active": detector.active_model_name is not None,
@@ -97,6 +130,18 @@ def build_status(project_root: Path) -> dict:
         },
         "database": _database_status(db_path),
     }
+
+
+def cached_status(project_root: Path, max_age_seconds: float = 0.75) -> dict:
+    global _STATUS_CACHE  # noqa: PLW0603
+    now = time()
+    with _STATUS_CACHE_LOCK:
+        if _STATUS_CACHE and now - _STATUS_CACHE[0] <= max_age_seconds:
+            return _STATUS_CACHE[1]
+    status = build_status(project_root)
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE = (time(), status)
+    return status
 
 
 def _version(project_root: Path) -> dict:
@@ -179,23 +224,30 @@ class StatusHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         route = parsed.path
+        if route == "/api/v1/ws/live":
+            self._handle_websocket()
+            return
         if route in {"/health", "/status", "/api/v1/health", "/api/v1/status"}:
-            status = build_status(self.project_root)
+            status = cached_status(self.project_root)
             code = 200 if status["hailo"]["device_detected"] else 503
             self._send_json(code, status)
             return
         if route in {"/api/v1/version"}:
-            self._send_json(200, build_status(self.project_root)["version"])
+            self._send_json(200, cached_status(self.project_root)["version"])
             return
         if route in {"/api/v1/counts/current"}:
-            self._send_json(200, build_status(self.project_root)["counts"])
+            self._send_json(200, cached_status(self.project_root)["counts"])
             return
         if route in {"/api/v1/telemetry/current"}:
-            status = build_status(self.project_root)
+            status = cached_status(self.project_root)
             self._send_json(200, {"timestamp": status["timestamp"], "host": status["host"], "hailo": status["hailo"], "database": status["database"]})
             return
         if route in {"/api/v1/cameras"}:
-            self._send_json(200, {"cameras": build_status(self.project_root)["cameras"]})
+            self._send_json(200, {"cameras": cached_status(self.project_root)["cameras"]})
+            return
+        if route in {"/api/v1/runtime"}:
+            status = cached_status(self.project_root)
+            self._send_json(200, {"runtime": status.get("runtime", {}), "live_data_available": status.get("live_data_available", False)})
             return
         if route in {"/api/v1/events"}:
             query = parse_qs(parsed.query)
@@ -203,7 +255,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"events": _events(self.project_root, max(1, min(limit, 200)))})
             return
         if route == "/metrics":
-            status = build_status(self.project_root)
+            status = cached_status(self.project_root)
             lines = [
                 f"visitor_counter_hailo_device_detected {1 if status['hailo']['device_detected'] else 0}",
                 f"visitor_counter_detector_hef_exists {1 if status['detector']['hef_exists'] else 0}",
@@ -229,8 +281,63 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_websocket(self) -> None:
+        if self.headers.get("Upgrade", "").lower() != "websocket":
+            self._send_json(426, {"error": "websocket upgrade required", "path": "/api/v1/ws/live"})
+            return
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self._send_json(400, {"error": "missing Sec-WebSocket-Key"})
+            return
+        accept = base64.b64encode(
+            hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
+        ).decode("ascii")
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.close_connection = True
+        self.connection.settimeout(3.0)
+        while True:
+            try:
+                if _client_closed(self.connection):
+                    break
+                status = cached_status(self.project_root)
+                self.wfile.write(_websocket_text_frame(json.dumps(status, separators=(",", ":"), sort_keys=True)))
+                self.wfile.flush()
+                sleep(1.0)
+            except (BrokenPipeError, ConnectionResetError, TimeoutError, socket.timeout, OSError):
+                break
+
+
+def _websocket_text_frame(text: str) -> bytes:
+    payload = text.encode("utf-8")
+    length = len(payload)
+    if length < 126:
+        header = struct.pack("!BB", 0x81, length)
+    elif length < 65536:
+        header = struct.pack("!BBH", 0x81, 126, length)
+    else:
+        header = struct.pack("!BBQ", 0x81, 127, length)
+    return header + payload
+
+
+def _client_closed(connection: socket.socket) -> bool:
+    readable, _, _ = select.select([connection], [], [], 0)
+    if not readable:
+        return False
+    try:
+        data = connection.recv(2, socket.MSG_PEEK)
+    except BlockingIOError:
+        return False
+    except OSError:
+        return True
+    return data == b""
 
 
 def _events(project_root: Path, limit: int) -> list[dict]:
@@ -271,7 +378,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Local visitor-counter status API.")
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
     StatusHandler.project_root = args.project_root.resolve()
     server = ThreadingHTTPServer((args.host, args.port), StatusHandler)

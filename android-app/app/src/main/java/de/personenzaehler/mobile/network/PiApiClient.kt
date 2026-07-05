@@ -24,6 +24,12 @@ data class RestResponse<T>(
     val responseTimeMs: Long,
 )
 
+enum class LiveSocketState(val label: String) {
+    Connected("verbunden"),
+    Unavailable("nicht verfuegbar"),
+    Disconnected("getrennt"),
+}
+
 class PiApiClient(
     private val tokenStore: SecureTokenStore,
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -58,7 +64,7 @@ class PiApiClient(
     fun openLiveSocket(
         settings: ServerSettings,
         onStatus: (ServerStatus) -> Unit,
-        onState: (Boolean, String?) -> Unit,
+        onState: (LiveSocketState, String?) -> Unit,
     ): WebSocket? {
         if (!settings.webSocketEnabled || !settings.configured || !HostValidator.isAllowed(settings.scheme, settings.host)) return null
         val wsScheme = if (settings.scheme == "https") "wss" else "ws"
@@ -67,19 +73,27 @@ class PiApiClient(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    onState(true, null)
+                    onState(LiveSocketState.Connected, null)
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    runCatching { StatusParser.parseStatus(text) }.onSuccess(onStatus)
+                    runCatching { StatusParser.parseStatus(text) }
+                        .onSuccess(onStatus)
+                        .onFailure { onState(LiveSocketState.Disconnected, it.message ?: "WebSocket-Daten unlesbar") }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    onState(false, reason.ifBlank { "WebSocket geschlossen" })
+                    onState(LiveSocketState.Disconnected, reason.ifBlank { "WebSocket geschlossen" })
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    onState(false, t.message ?: "WebSocket nicht verfuegbar")
+                    val status = response?.code
+                    val state = if (status == 404 || status == 426) LiveSocketState.Unavailable else LiveSocketState.Disconnected
+                    val message = when {
+                        status != null -> "HTTP $status: ${response.message.ifBlank { t.message ?: "WebSocket fehlgeschlagen" }}"
+                        else -> t.message ?: "WebSocket nicht verfuegbar"
+                    }
+                    onState(state, message)
                 }
             },
         )

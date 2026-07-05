@@ -257,13 +257,15 @@ private fun StatusBanner(state: MobileUiState) {
             Text(if (state.connection.restConnected) "Server verbunden" else "Keine Verbindung zum Server", fontWeight = FontWeight.Bold)
             Text(state.connection.message)
             Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
-            Text("WebSocket: ${if (state.connection.webSocketConnected) "verbunden" else "nicht verfuegbar"}")
+            Text("WebSocket: ${state.connection.webSocketStatus}")
             Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
             Text("HTTP: ${state.connection.httpStatus ?: "N/A"} | Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
-            Text("Letzte Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+            Text("Letzter REST-Erfolg: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+            Text("Letzter WebSocket-Empfang: ${state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
             Text("Handy-Netz: ${state.network.transport} ${state.network.ssid ?: ""} ${state.network.ipAddress ?: ""}".trim())
             state.network.bssid?.let { Text("Access Point: $it") }
-            state.connection.lastError?.let { Text("Fehler: $it", color = MaterialTheme.colorScheme.error) }
+            state.connection.lastError?.let { Text("REST-Fehler: $it", color = MaterialTheme.colorScheme.error) }
+            state.connection.webSocketError?.let { Text("WebSocket-Fehler: $it", color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -360,15 +362,16 @@ private fun SystemScreen(status: ServerStatus?, state: MobileUiState) {
                     "System-Uptime" to formatDuration(status?.host?.systemUptimeSeconds),
                     "DB-Groesse" to formatBytes(status?.database?.sizeBytes),
                     "REST-Status" to if (state.connection.restConnected) "OK" else "Offline",
-                    "WebSocket" to if (state.connection.webSocketConnected) "OK" else "nicht verfuegbar",
+                    "WebSocket" to state.connection.webSocketStatus,
                     "Handy-Netz" to listOfNotNull(state.network.transport, state.network.ssid, state.network.ipAddress).joinToString(" ").ifBlank { "N/A" },
                     "Access Point" to (state.network.bssid ?: "N/A"),
                     "Git-Commit" to (status?.version?.gitCommit ?: "N/A"),
                     "Hailo erkannt" to when (status?.hailo?.deviceDetected) { true -> "ja"; false -> "nein"; null -> "N/A" },
-                    "Modell geladen" to when (status?.detector?.active) { true -> "ja"; false -> "nein"; null -> "N/A" },
-                    "Inferenz aktiv" to when (status?.detector?.active) { true -> "ja"; false -> "nein"; null -> "N/A" },
-                    "Hailo-Temperatur" to "N/A",
-                    "Hailo-Auslastung" to "N/A",
+                    "Modell geladen" to yesNoNa(status?.runtime?.modelLoaded),
+                    "Inferenz aktiv" to yesNoNa(status?.runtime?.inferenceActive),
+                    "Inferenz-FPS" to formatDouble(status?.runtime?.inferenceFps),
+                    "Hailo-Latenz" to formatDouble(status?.runtime?.hailoLatencyMs, " ms"),
+                    "Hailo-Status" to (status?.runtime?.hailoStatus ?: "N/A"),
                 ),
             )
         }
@@ -383,6 +386,7 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
     var refresh by rememberSaveable(state.settings.refreshSeconds) { mutableStateOf(state.settings.refreshSeconds.toString()) }
     var ws by rememberSaveable(state.settings.webSocketEnabled) { mutableStateOf(state.settings.webSocketEnabled) }
     var notifications by rememberSaveable(state.settings.notificationsEnabled) { mutableStateOf(state.settings.notificationsEnabled) }
+    var offlineWarn by rememberSaveable(state.settings.serverOfflineWarnSeconds) { mutableStateOf(state.settings.serverOfflineWarnSeconds.toString()) }
     var tempLimit by rememberSaveable(state.settings.temperatureLimitC) { mutableStateOf(state.settings.temperatureLimitC.toString()) }
     var token by rememberSaveable { mutableStateOf("") }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -407,6 +411,7 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
                 Text("Benachrichtigungen erlauben")
             }
         }
+        OutlinedTextField(offlineWarn, { offlineWarn = it.filter(Char::isDigit) }, label = { Text("Offline-Warnung nach Sekunden") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(tempLimit, { tempLimit = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Temperaturgrenze C") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(token, { token = it }, label = { Text("Pairing-Code oder Token (optional)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -418,6 +423,7 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
                     refreshSeconds = refresh.toIntOrNull() ?: 5,
                     webSocketEnabled = ws,
                     notificationsEnabled = notifications,
+                    serverOfflineWarnSeconds = offlineWarn.toIntOrNull() ?: 30,
                     temperatureLimitC = tempLimit.toDoubleOrNull() ?: 75.0,
                 )
                 viewModel.saveSettings(settings)
@@ -452,15 +458,17 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
         }
         Divider()
         Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
-        Text("WebSocket: ${if (state.connection.webSocketConnected) "verbunden" else "nicht verfuegbar"}")
+        Text("WebSocket: ${state.connection.webSocketStatus}")
         Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
         Text("HTTP-Status: ${state.connection.httpStatus ?: "N/A"}")
         Text("Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
-        Text("Letzte erfolgreiche Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+        Text("Letzter REST-Erfolg: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+        Text("Letzter WebSocket-Empfang: ${state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
         Text("Handy-Netz: ${state.network.transport} | verfuegbar=${state.network.available} | validiert=${state.network.validated}")
         Text("SSID: ${state.network.ssid ?: "N/A"} | BSSID: ${state.network.bssid ?: "N/A"}")
         Text("Handy-IP: ${state.network.ipAddress ?: "N/A"}")
-        state.connection.lastError?.let { Text("Letzter Fehler: $it", color = MaterialTheme.colorScheme.error) }
+        state.connection.lastError?.let { Text("Letzter REST-Fehler: $it", color = MaterialTheme.colorScheme.error) }
+        state.connection.webSocketError?.let { Text("Letzter WebSocket-Fehler: $it", color = MaterialTheme.colorScheme.error) }
         Text("App-Version: ${state.appVersionText}")
         Text("Serverversion: ${state.serverVersionText}")
         Text("Pairing: Der aktuelle Server meldet kein vollstaendiges Pairing-Verfahren. Die App speichert optionale Bearer Tokens sicher und sendet sie mit, sobald der Server sie auswertet.")
@@ -556,4 +564,10 @@ private fun EmptyCard(message: String) {
 @Composable
 private fun SectionTitle(title: String) {
     Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+}
+
+private fun yesNoNa(value: Boolean?): String = when (value) {
+    true -> "ja"
+    false -> "nein"
+    null -> "N/A"
 }
