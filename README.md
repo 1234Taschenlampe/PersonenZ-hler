@@ -1,13 +1,15 @@
-# YOLO26x Dual-Kamera Besucherzaehler
+# YOLO26m Dual-Kamera Besucherzaehler
 
-Native PySide6-Desktop-Anwendung fuer einen Raspberry Pi 5 mit Raspberry Pi AI HAT+ 2, Hailo-10H und zwei Kameras.
+Native PySide6-Desktop-Anwendung fuer einen Raspberry Pi 5 mit Hailo-10H und zwei Kameras.
+
+Das Laufzeitsystem verwendet das YOLO26m COCO Detection HEF fuer Hailo-10H und filtert auf COCO-Klasse `person`. Es soll keine CPU-Inferenz, OpenCV-DNN, Dummy-Daten oder Pose-HEFs als Ersatz fuer die produktive Detektion verwenden.
 
 ## Hardware
 
-- Raspberry Pi 5, 64-bit Raspberry Pi OS oder kompatibles Debian
-- Raspberry Pi AI HAT+ 2 mit Hailo-10H
-- Zwei V4L2-kompatible Kameras
-- Empfohlen: stabile Kamera-Pfade unter `/dev/v4l/by-path/`
+- Raspberry Pi 5 mit 64-bit Raspberry Pi OS oder kompatiblem Debian
+- Hailo-10H
+- Zwei V4L2-kompatible USB-Kameras
+- Empfohlen: stabile Kamera-Pfade unter `/dev/v4l/by-path/` oder `/dev/v4l/by-id/`
 
 ## Installation
 
@@ -25,7 +27,7 @@ hailortcli --version
 hailortcli fw-control identify
 ```
 
-Wenn diese Befehle fehlen oder kein Geraet melden, ist die App startbar, aber Hailo-Inferenz bleibt sichtbar nicht bereit.
+Wenn diese Befehle fehlen oder kein Geraet melden, startet die App, aber Hailo-Inferenz bleibt sichtbar nicht bereit.
 
 ## Kameraerkennung
 
@@ -35,27 +37,7 @@ ls -l /dev/v4l/by-path/
 ls -l /dev/video*
 ```
 
-Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen.
-
-## YOLO26x Export und Hailo-10H Kompilierung
-
-Auf einem x86-64-Ubuntu-System mit Hailo Dataflow Compiler:
-
-```bash
-python3 -m venv .venv-hailo
-. .venv-hailo/bin/activate
-pip install -r tools/hailo_compile_yolo26x/requirements.txt
-cp /path/to/yolo26x.pt models/yolo26x.pt
-tools/hailo_compile_yolo26x/compile_yolo26x.sh data/calibration
-```
-
-Zielausgabe:
-
-```text
-models/yolo26x_hailo10h_640.hef
-```
-
-Kopiere diese HEF-Datei auf den Raspberry Pi in denselben Pfad.
+Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen. Metadaten-Nodes wie `/dev/video1` oder `/dev/video3` werden nicht als Bildquellen verwendet, wenn sie keine Frames liefern.
 
 ## Programmstart
 
@@ -84,60 +66,32 @@ Das erstellt:
 ~/.local/share/applications/personenzaehler.desktop
 ```
 
-Der Launcher verwendet `scripts/start_gui.sh`, startet die `.venv`, schreibt `logs/gui_launcher.log`, verhindert Mehrfachstarts per Lock/PID-Datei und zeigt Startfehler grafisch an, wenn `zenity`, `kdialog` oder PySide6 verfuegbar sind.
+Der Launcher verwendet `scripts/start_gui.sh`, startet den vorhandenen `visitor-counter.service` bei Bedarf und verhindert doppelte GUI-Starts.
 
 ## GUI-Bedienung
 
-Die Anwendung zeigt Kamera 1 links und Kamera 2 rechts. Bounding Boxes, Track-IDs und Zaehl-Linien werden in den Kamerabildern angezeigt. Wenn `models/yolo26x_hailo10h_640.hef` fehlt oder HailoRT nicht geladen werden kann, zeigt die Kopfzeile den fehlenden YOLO26x-HEF-Status.
+Die Anwendung zeigt Kamera 1 links und Kamera 2 rechts. Sie zeigt Livebilder, Zaehlwerte, Modellstatus, Kameraauswahl, Diagnosewerte und Steuerbuttons.
 
-Unter `Kameraeinstellungen` koennen Kamera 1 und Kamera 2 ueber benutzerfreundliche Eintraege mit Hersteller, Modell, stabilem `/dev/v4l/by-id`- oder `/dev/v4l/by-path`-Pfad, aktuellem `/dev/videoX`-Knoten, Hauptaufloesung und Frei/Belegt-Status ausgewaehlt werden. Dieselbe Kamera kann nicht doppelt zugewiesen werden.
+Wichtige Zaehlwerte:
 
-Bedienelemente:
+- `global inside`: aktuell stabil anwesende globale Personen
+- `global in`: bestaetigte globale Eintritte
+- `global out`: bestaetigte globale Austritte
+- `camera 1/2 visible`: aktuell sichtbare Personen pro Kamera
+- `suppressed`: unterdrueckte Doppelzaehlungen
+- `uncertain`: unsichere Ereignisse
 
-- Start, Stopp, Neustart
-- Zaehler zuruecksetzen
-- Kameras neu erkennen
-- Konfidenz, Tracking und Konsensfenster einstellen
-- Einstellungen speichern
-- Diagnosebericht erstellen
+## Zaehllogik
 
-## Linien kalibrieren
+Die globale Live-Zaehlung ist von der Anzeige sichtbarer Personen getrennt. Eine Person wird erst nach mehreren bestaetigten Frames als `inside` gezaehlt. Wenn sie verschwindet, wartet die Pipeline eine kurze Grace-Zeit, bevor `inside` sinkt und `global out` steigt.
 
-Die gelbe Linie in jedem Kamerabild kann an beiden Endpunkten mit der Maus verschoben werden. Einstellungen werden in `config/config.yaml` gespeichert.
+Vor Tracking und ReID werden nur echte Personendetektionen mit ausreichender Konfidenz, sinnvoller Groesse und plausibler Box-Form verwendet. Dadurch werden kurze Fehlklassifikationen und Tracker-Flackern nicht direkt gezaehlt.
 
-## Dual-Kamera-Konsens
+Es werden keine Gesichter erkannt, keine Namen gespeichert und keine dauerhaften biometrischen Gesichtsdaten abgelegt.
 
-Jede Kamera erzeugt lokale Linienueberquerungen. Die Konsenslogik vergleicht Kamera-ID, Richtung, Zeitfenster, Zone und Bounding-Box-Groesse. Starke Treffer werden als Doppelzaehlung unterdrueckt, schwache Treffer als unsicher protokolliert. Es werden keine Gesichter erkannt und keine biometrischen Gesichtsdaten gespeichert.
+## Datenbank
 
-## Modell-Cleanup
-
-Zuerst trocken laufen lassen:
-
-```bash
-PYTHONPATH=src python3 scripts/cleanup_old_models.py
-```
-
-Danach pruefen:
-
-```bash
-cat logs/model_inventory_before_cleanup.json
-cat logs/models_to_delete.json
-cat logs/model_cleanup_result.json
-```
-
-Nur wenn der Plan korrekt ist:
-
-```bash
-PYTHONPATH=src python3 scripts/cleanup_old_models.py --delete
-```
-
-Das Skript schuetzt Systempfade wie `/boot`, `/etc`, `/lib`, `/usr/lib` und behaelt `yolo26x.pt`, `yolo26x.onnx`, `yolo26x.har`, `yolo26x.hef` und `yolo26x_hailo10h_640.hef`.
-
-Benutzer-Caches werden nur mit expliziter Option durchsucht:
-
-```bash
-PYTHONPATH=src python3 scripts/cleanup_old_models.py --include-user-caches
-```
+Die lokale SQLite-Datenbank nutzt WAL-Modus, Foreign Keys, Transaktionen und idempotente Initialisierung. Live-Global-Counter werden in `global_counts` gespiegelt, damit GUI und Neustart dieselben Werte sehen.
 
 ## Tests
 
@@ -153,37 +107,33 @@ Hardwaretests auf dem Raspberry Pi:
 pytest -m hardware
 ```
 
-Performance-Smoke-Report:
+## Deployment auf den Raspberry Pi
 
-```bash
-PYTHONPATH=src python3 scripts/performance_smoke.py --duration 60
-cat logs/performance_report.json
+Wenn der Pi erreichbar ist:
+
+```powershell
+.\tools\deploy_pi_live_counter_fix.ps1
 ```
+
+Das Skript kopiert die relevanten Fix-Dateien auf den Pi, fuehrt die wichtigsten Tests aus, startet `visitor-counter.service` neu und zeigt relevante Logzeilen.
 
 ## systemd Autostart
 
-Pfad im Service ggf. anpassen, dann:
+User-Service auf dem Raspberry Pi:
+
+```bash
+systemctl --user status visitor-counter.service
+systemctl --user restart visitor-counter.service
+journalctl --user -u visitor-counter.service -f
+```
+
+System-Service, falls genutzt:
 
 ```bash
 sudo cp systemd/visitor-counter.service /etc/systemd/system/visitor-counter.service
 sudo systemctl daemon-reload
 sudo systemctl enable visitor-counter.service
 sudo systemctl start visitor-counter.service
-```
-
-Status und Logs:
-
-```bash
-systemctl status visitor-counter.service
-journalctl -u visitor-counter.service -f
-tail -f logs/application.log
-tail -f logs/errors.log
-```
-
-Stoppen:
-
-```bash
-sudo systemctl stop visitor-counter.service
 ```
 
 ## Fehlerdiagnose
@@ -194,13 +144,6 @@ PYTHONPATH=src python3 -c "from pathlib import Path; from visitor_counter.diagno
 cat logs/diagnostics_report.json
 ```
 
-## Deinstallation
+## GitHub Pages Konzeptseite
 
-```bash
-sudo systemctl disable --now visitor-counter.service || true
-sudo rm -f /etc/systemd/system/visitor-counter.service
-sudo systemctl daemon-reload
-rm -rf .venv data/visitor_counter.sqlite3
-```
-
-Loesche `models/` nur, wenn keine HEF-, HAR-, ONNX- oder Ausgangsmodelle mehr benoetigt werden.
+`index.html` stammt aus der vorherigen GitHub-`main`-Historie und beschreibt eine animierte Konzeptseite fuer das KI-Kameraprojekt. Sie ist nicht der produktive Raspberry-Pi-Runtime-Code.
