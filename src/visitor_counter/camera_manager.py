@@ -139,6 +139,26 @@ def _format_summary(video_node: str) -> str:
     return "Aufloesung unbekannt"
 
 
+def _is_usb_frame_capture_device(video_node: str) -> bool:
+    try:
+        info = subprocess.run(["v4l2-ctl", "-d", video_node, "--info"], capture_output=True, text=True, timeout=2)
+        formats = subprocess.run(
+            ["v4l2-ctl", "-d", video_node, "--list-formats-ext"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return False
+    if info.returncode != 0 or formats.returncode != 0:
+        return False
+    if "Driver name      : uvcvideo" not in info.stdout and "Bus info         : usb" not in info.stdout:
+        return False
+    if "Device Caps" in info.stdout and "Metadata Capture" in info.stdout and "Video Capture\n" not in info.stdout:
+        return False
+    return "Size: Discrete" in formats.stdout
+
+
 def _name_parts(stable_path: str) -> tuple[str, str]:
     name = Path(stable_path).name
     if "Logitech" in name or "046d" in name:
@@ -149,12 +169,7 @@ def _name_parts(stable_path: str) -> tuple[str, str]:
 
 
 def discover_cameras() -> list[str]:
-    devices: list[str] = [device.video_node for device in discover_camera_devices()]
-    for index in range(10):
-        candidate = Path(f"/dev/video{index}")
-        if candidate.exists():
-            devices.append(str(candidate))
-    return list(dict.fromkeys(devices))
+    return [device.video_node for device in discover_camera_devices()]
 
 
 def discover_camera_devices() -> list[CameraDeviceInfo]:
@@ -179,6 +194,10 @@ def discover_camera_devices() -> list[CameraDeviceInfo]:
                 path_by_node.setdefault(node, str(path))
     for node, stable in path_by_node.items():
         stable_by_node.setdefault(node, stable)
+    for candidate in sorted(Path("/dev").glob("video*"), key=lambda value: int(value.name.replace("video", "") or 999)):
+        node = str(candidate)
+        if node not in stable_by_node and _is_usb_frame_capture_device(node):
+            stable_by_node[node] = node
 
     devices: list[CameraDeviceInfo] = []
     for node in sorted(stable_by_node, key=lambda value: int(value.replace("/dev/video", "") or 999)):

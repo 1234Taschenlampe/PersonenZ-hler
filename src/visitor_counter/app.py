@@ -4,7 +4,6 @@ import argparse
 import hashlib
 from pathlib import Path
 
-from .gui import run_gui
 from .synthetic_test import run_synthetic_counter_test
 
 
@@ -43,6 +42,8 @@ def main() -> int:
             print("WARNING: Production database was modified during the test!")
         return result
         
+    from .gui import run_gui
+
     return run_gui(project_root)
 
 

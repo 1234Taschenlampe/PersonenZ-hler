@@ -5,7 +5,7 @@ mkdir -p "$HOME/.config/systemd/user"
 service="$HOME/.config/systemd/user/visitor-counter.service"
 cat > "$service" <<SERVICE
 [Unit]
-Description=YOLO26x Dual-Camera Visitor Counter GUI
+Description=YOLO26m Dual-Camera Visitor Counter GUI
 After=graphical-session.target
 PartOf=graphical-session.target
 

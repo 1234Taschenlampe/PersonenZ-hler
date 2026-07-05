@@ -154,6 +154,7 @@ class MainWindow(QMainWindow):
         self.camera_selects: dict[str, QComboBox] = {}
         self._build_ui()
         self._wire_signals()
+        self._repair_camera_assignments()
         self._refresh_model_status()
         self._maybe_start_setup_wizard()
         self._status_timer = QTimer(self)
@@ -163,6 +164,9 @@ class MainWindow(QMainWindow):
         self._external_stop_timer = QTimer(self)
         self._external_stop_timer.timeout.connect(self._poll_external_stop)
         self._external_stop_timer.start(500)
+        self._camera_repair_timer = QTimer(self)
+        self._camera_repair_timer.timeout.connect(self._poll_camera_assignments)
+        self._camera_repair_timer.start(5000)
         self.start_processing()
 
     def _build_ui(self) -> None:
@@ -332,11 +336,13 @@ class MainWindow(QMainWindow):
     def start_processing(self) -> None:
         if any(capture.is_alive() for capture in self.captures) or (self.pipeline and self.pipeline.is_alive()):
             return
+        self._repair_camera_assignments()
         self.stop_event = Event()
         self.frame_queue = LatestFrameHub(list(self.config.cameras))
         self.captures = [
             CameraCapture(camera_config, self.frame_queue, self.stop_event, frame_callback=self._on_capture_packet)
             for camera_config in self.config.cameras.values()
+            if camera_config.device
         ]
         self.pipeline = None
         if not self.config.display.display_raw_frames_only:
@@ -374,6 +380,7 @@ class MainWindow(QMainWindow):
     def refresh_cameras(self) -> None:
         self.camera_device_infos = discover_camera_devices()
         self.camera_devices = [info.video_node for info in self.camera_device_infos]
+        self._repair_camera_assignments()
         for camera_id, combo in self.camera_selects.items():
             combo.blockSignals(True)
             combo.clear()
@@ -396,6 +403,54 @@ class MainWindow(QMainWindow):
             combo.blockSignals(False)
         if not self.camera_device_infos:
             self._show_warning("Keine Kamera erkannt.")
+
+    def _repair_camera_assignments(self, save: bool = True) -> bool:
+        if not self.camera_device_infos:
+            self.camera_device_infos = discover_camera_devices()
+        stable_paths = [info.stable_path for info in self.camera_device_infos]
+        available = set(stable_paths)
+        used: set[str] = set()
+        changed = False
+
+        for camera_id in sorted(self.config.cameras):
+            camera = self.config.cameras[camera_id]
+            current = self._stable_for_any_device(camera.device)
+            if current and current in available and current not in used:
+                if camera.device != current:
+                    camera.device = current
+                    changed = True
+                used.add(current)
+                continue
+            if camera.device is not None:
+                LOGGER.warning("Clearing unavailable camera path for %s: %s", camera_id, camera.device)
+                camera.device = None
+                changed = True
+
+        for camera_id in sorted(self.config.cameras):
+            camera = self.config.cameras[camera_id]
+            if camera.device:
+                continue
+            replacement = next((path for path in stable_paths if path not in used), None)
+            if replacement is None:
+                continue
+            LOGGER.info("Assigning discovered camera to %s: %s", camera_id, replacement)
+            camera.device = replacement
+            used.add(replacement)
+            changed = True
+
+        if changed and save:
+            save_config(self.config, self.config_path)
+        return changed
+
+    def _poll_camera_assignments(self) -> None:
+        if all(camera.device for camera in self.config.cameras.values()):
+            return
+        self.camera_device_infos = discover_camera_devices()
+        if not self._repair_camera_assignments():
+            return
+        self.refresh_cameras()
+        if self.captures or self.pipeline:
+            self.restart_processing()
 
     def save_settings(self) -> None:
         self._persist_settings()
@@ -662,8 +717,11 @@ class MainWindow(QMainWindow):
             lines.append("YOLO26m Detection HEF lesbar" if valid else f"YOLO26m HEF ungueltig: {message}")
         reid_status = OSNetReIDManager(self.config.model, self.project_root).status(validate_hailo=False)
         lines.append(reid_status.message)
-        hailo = subprocess.run(["hailortcli", "scan"], capture_output=True, text=True, timeout=5)
-        lines.append("Hailo-10H erkannt" if "Device:" in hailo.stdout else "Hailo-10H nicht erkannt")
+        try:
+            hailo = subprocess.run(["hailortcli", "scan"], capture_output=True, text=True, timeout=5)
+            lines.append("Hailo-10H erkannt" if "Device:" in hailo.stdout else "Hailo-10H nicht erkannt")
+        except (FileNotFoundError, subprocess.SubprocessError) as exc:
+            lines.append(f"Hailo-10H Status nicht pruefbar: {exc}")
         return lines
 
     def _validate_hef_basic(self, path: Path) -> tuple[bool, str]:
@@ -696,6 +754,19 @@ class MainWindow(QMainWindow):
             if info.video_node == video_node:
                 return info.stable_path
         return None
+
+    def _stable_for_any_device(self, device: str | None) -> str | None:
+        if not device:
+            return None
+        for info in self.camera_device_infos:
+            if device in {info.stable_path, info.video_node}:
+                return info.stable_path
+            try:
+                if Path(device).resolve() == Path(info.video_node).resolve():
+                    return info.stable_path
+            except OSError:
+                pass
+        return device if Path(device).exists() else None
 
     def _show_warning(self, message: str) -> None:
         QMessageBox.warning(self, "Personenzaehler", message)
@@ -789,6 +860,7 @@ def run_gui(project_root: Path) -> int:
     signal_timer.start(250)
     window._signal_resources = (read_socket, write_socket, signal_notifier, signal_timer)  # type: ignore[attr-defined]
     app.aboutToQuit.connect(signal_timer.stop)
+    app.aboutToQuit.connect(window._camera_repair_timer.stop)
     app.aboutToQuit.connect(lambda: stop_file.unlink(missing_ok=True))
     app.aboutToQuit.connect(signal_notifier.setEnabled(False))
     app.aboutToQuit.connect(lambda: signal.set_wakeup_fd(-1))

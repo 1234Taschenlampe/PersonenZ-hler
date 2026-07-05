@@ -79,12 +79,18 @@ class TrackingConfig:
 
 @dataclass
 class IdentityConfig:
-    match_window_seconds: float = 3.0
-    stale_seconds: float = 2.0
+    match_window_seconds: float = 6.0
+    stale_seconds: float = 3.0
     reid_threshold: float = 0.62
     hysteresis_seconds: float = 1.5
     reid_update_interval_seconds: float = 2.0
     cache_ttl_seconds: float = 1800.0
+    live_entry_min_frames: int = 3
+    live_exit_grace_seconds: float = 2.0
+    live_min_confidence: float = 0.35
+    live_min_bbox_area: float = 2500.0
+    live_min_aspect_ratio: float = 0.18
+    live_max_aspect_ratio: float = 1.40
 
 
 @dataclass

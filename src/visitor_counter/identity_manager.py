@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from math import sqrt
 
 from .configuration import IdentityConfig
@@ -12,6 +12,7 @@ class GlobalIdentityStats:
     global_visible: int = 0
     suppressed_matches: int = 0
     uncertain_matches: int = 0
+    visible_global_ids: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -70,12 +71,18 @@ class GlobalIdentityManager:
             self._profiles[global_id] = self._profile(global_id, camera_id, track, timestamp, frame_width, frame_height)
             visible_global_ids.add(global_id)
             assigned.append(replace(track, global_person_id=global_id))
-        self.stats.global_visible = len(self._visible_ids(timestamp) | visible_global_ids)
+        visible = self._visible_ids(timestamp) | visible_global_ids
+        self.stats.global_visible = len(visible)
+        self.stats.visible_global_ids = visible
         return assigned
 
     @property
     def global_visible(self) -> int:
         return self.stats.global_visible
+
+    @property
+    def visible_global_ids(self) -> set[int]:
+        return set(self.stats.visible_global_ids or set())
 
     def _allocate_global_id(self) -> int:
         value = self._next_global_id

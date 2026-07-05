@@ -28,10 +28,25 @@ PY
 
 raise_existing() {
   if command -v wmctrl >/dev/null 2>&1; then
+    wmctrl -a "YOLO26m Dual-Kamera Besucherzaehler" >/dev/null 2>&1 && return 0
     wmctrl -a "YOLO26x Dual-Kamera Besucherzaehler" >/dev/null 2>&1 && return 0
     wmctrl -a "Personenzähler" >/dev/null 2>&1 && return 0
+    wmctrl -a "Personenzaehler" >/dev/null 2>&1 && return 0
   fi
   return 1
+}
+
+start_user_service_if_available() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! systemctl --user cat visitor-counter.service >/dev/null 2>&1; then
+    return 1
+  fi
+  systemctl --user start visitor-counter.service >> "$LOG_FILE" 2>&1 || return 1
+  sleep 1
+  raise_existing || true
+  return 0
 }
 
 {
@@ -69,6 +84,10 @@ exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "Instanz laeuft bereits." >> "$LOG_FILE"
   raise_existing || true
+  exit 0
+fi
+
+if start_user_service_if_available; then
   exit 0
 fi
 

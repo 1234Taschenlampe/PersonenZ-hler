@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic
@@ -26,6 +26,14 @@ LOGGER = logging.getLogger(__name__)
 
 FrameCallback = Callable[[str, object, list[TrackedObject]], None]
 StatsCallback = Callable[[RuntimeStats, GlobalCounts], None]
+
+
+@dataclass
+class _LivePresenceMemory:
+    first_seen_at: float
+    last_seen_at: float
+    frames_seen: int = 0
+    counted_inside: bool = False
 
 
 class ProcessingPipeline(Thread):
@@ -73,6 +81,9 @@ class ProcessingPipeline(Thread):
         self._gui_interval_seconds = 1.0 / 15.0
         self._next_gui_emit_at: dict[str, float] = {camera_id: 0.0 for camera_id in config.cameras}
         self._reid_cache: dict[tuple[str, int], tuple[float, tuple[float, ...]]] = {}
+        self._inside_global_person_ids: set[int] = set()
+        self._live_presence: dict[int, _LivePresenceMemory] = {}
+        self._last_persisted_global_counts: tuple[int, int, int] | None = None
 
     def run(self) -> None:
         LOGGER.info("Starting processing pipeline")
@@ -129,13 +140,15 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.camera_obstructed[packet.camera_id] = obstruction.obstructed
             detect_start = monotonic()
             detections = [] if obstruction.obstructed else self._detect(packet)
+            detections = self._filter_person_detections(detections, packet.width, packet.height)
             stage_ms["detect_total_ms"] = (monotonic() - detect_start) * 1000.0
             stage_ms.update(self.hailo.last_stage_ms)
             tracker_start = monotonic()
             tracks = self.trackers[packet.camera_id].update(packet.camera_id, detections)
             stage_ms["tracker_ms"] = (monotonic() - tracker_start) * 1000.0
+            countable_tracks = self._filter_live_count_tracks(tracks, packet.width, packet.height)
             reid_start = monotonic()
-            tracks = self._with_reid_embeddings(packet, tracks)
+            tracks = self._with_reid_embeddings(packet, countable_tracks)
             stage_ms["osnet_reid_ms"] = (monotonic() - reid_start) * 1000.0
             identity_start = monotonic()
             tracks = self.identity.update(packet.camera_id, tracks, packet.captured_at, packet.width, packet.height)
@@ -144,6 +157,7 @@ class ProcessingPipeline(Thread):
             self.database.update_last_seen(visible_ids, packet.captured_at)
             self.global_counts.visible = self.identity.global_visible
             self.runtime_stats.global_visible = self.identity.global_visible
+            self._sync_live_presence_counts(visible_ids, packet.captured_at)
             events = [] if obstruction.obstructed else self.counters[packet.camera_id].update(packet.frame_id, tracks)
             for event in events:
                 decision = self.consensus.decide(event)
@@ -151,9 +165,7 @@ class ProcessingPipeline(Thread):
                     decision = ConsensusDecision(event, False, decision.duplicate_of, True, "missing global person id")
                 
                 prev_inside = self.global_counts.inside
-                self.global_counts.apply(event.direction, decision.counted, decision.uncertain)
                 event_id = self.database.record_decision(decision, self.config.model.model_name, self.runtime_stats.total_latency_ms)
-                self._restore_inside_only()
                 new_inside = self.global_counts.inside
                 
                 camera_num = 1 if packet.camera_id == "camera_1" else 2
@@ -239,6 +251,96 @@ class ProcessingPipeline(Thread):
         self.identity.reset()
         self.database.reset_global_counts()
         self.global_counts = GlobalCounts()
+        self._inside_global_person_ids.clear()
+        self._live_presence.clear()
+        self._last_persisted_global_counts = None
+
+    def _sync_live_presence_counts(self, visible_ids: set[int], timestamp: float) -> None:
+        for global_id in visible_ids:
+            memory = self._live_presence.get(global_id)
+            if memory is None:
+                memory = _LivePresenceMemory(first_seen_at=timestamp, last_seen_at=timestamp)
+                self._live_presence[global_id] = memory
+            memory.frames_seen += 1
+            memory.last_seen_at = timestamp
+            if memory.counted_inside or memory.frames_seen < self.config.identity.live_entry_min_frames:
+                continue
+            memory.counted_inside = True
+            self._inside_global_person_ids.add(global_id)
+            self.global_counts.entered += 1
+            LOGGER.info(
+                "LIVE_GLOBAL_COUNTER entered_ids=[%s] inside=%s entered_total=%s frames_seen=%s",
+                global_id,
+                len(self._inside_global_person_ids),
+                self.global_counts.entered,
+                memory.frames_seen,
+            )
+
+        exited: list[int] = []
+        grace = max(0.1, self.config.identity.live_exit_grace_seconds)
+        for global_id, memory in list(self._live_presence.items()):
+            if global_id in visible_ids:
+                continue
+            if timestamp - memory.last_seen_at <= grace:
+                continue
+            if memory.counted_inside and global_id in self._inside_global_person_ids:
+                self._inside_global_person_ids.remove(global_id)
+                self.global_counts.exited += 1
+                exited.append(global_id)
+            del self._live_presence[global_id]
+
+        self.global_counts.inside = len(self._inside_global_person_ids)
+        if exited:
+            LOGGER.info(
+                "LIVE_GLOBAL_COUNTER exited_ids=%s inside=%s exited_total=%s",
+                sorted(exited),
+                self.global_counts.inside,
+                self.global_counts.exited,
+            )
+        self._persist_global_counts()
+
+    def _persist_global_counts(self) -> None:
+        snapshot = (self.global_counts.entered, self.global_counts.exited, self.global_counts.inside)
+        if snapshot == getattr(self, "_last_persisted_global_counts", None):
+            return
+        database = getattr(self, "database", None)
+        if database is None:
+            self._last_persisted_global_counts = snapshot
+            return
+        self.database.set_global_counts(*snapshot)
+        self._last_persisted_global_counts = snapshot
+
+    def _filter_person_detections(self, detections: list[Detection], frame_width: int, frame_height: int) -> list[Detection]:
+        filtered: list[Detection] = []
+        for detection in detections:
+            if detection.class_id != 0 or detection.label != "person":
+                continue
+            if detection.confidence < self.config.identity.live_min_confidence:
+                continue
+            if not self._bbox_is_person_like(detection.bbox, frame_width, frame_height):
+                continue
+            filtered.append(detection)
+        return filtered
+
+    def _filter_live_count_tracks(self, tracks: list[TrackedObject], frame_width: int, frame_height: int) -> list[TrackedObject]:
+        return [
+            track
+            for track in tracks
+            if track.confirmed
+            and track.lost_frames == 0
+            and track.confidence >= self.config.identity.live_min_confidence
+            and self._bbox_is_person_like(track.bbox, frame_width, frame_height)
+        ]
+
+    def _bbox_is_person_like(self, bbox, frame_width: int, frame_height: int) -> bool:
+        if bbox.area < max(self.config.tracking.minimum_bbox_area, self.config.identity.live_min_bbox_area):
+            return False
+        if bbox.width < 8 or bbox.height < 24:
+            return False
+        if bbox.x2 <= 0 or bbox.y2 <= 0 or bbox.x1 >= frame_width or bbox.y1 >= frame_height:
+            return False
+        aspect_ratio = bbox.width / max(bbox.height, 1.0)
+        return self.config.identity.live_min_aspect_ratio <= aspect_ratio <= self.config.identity.live_max_aspect_ratio
 
     def _restore_counts(self) -> None:
         restored = self.database.restore_counts()

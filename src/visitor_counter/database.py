@@ -252,7 +252,10 @@ class EventDatabase:
             )
 
             self._connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_open ON presence_sessions(global_person_id, status)")
+            self._connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status_seen ON presence_sessions(status, last_seen_time)")
             self._connection.execute("CREATE INDEX IF NOT EXISTS idx_events_global ON counting_events(global_person_id, timestamp)")
+            self._connection.execute("CREATE INDEX IF NOT EXISTS idx_events_counted_direction ON counting_events(counted, uncertain, direction)")
+            self._connection.execute("CREATE INDEX IF NOT EXISTS idx_global_persons_last_seen ON global_persons(last_seen_time)")
             self._connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_counting_events_person_passage_type
@@ -384,6 +387,23 @@ class EventDatabase:
         self._connection.execute("DELETE FROM presence_sessions")
         self._connection.execute("DELETE FROM counting_events")
         self._connection.execute("DELETE FROM timeout_events")
+
+    def set_global_counts(self, entered: int, exited: int, inside: int) -> None:
+        with self._lock:
+            self._run_transaction(self._set_global_counts_tx, entered, exited, inside)
+
+    def _set_global_counts_tx(self, entered: int, exited: int, inside: int) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO global_counts(id, entered, exited, inside)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                entered = excluded.entered,
+                exited = excluded.exited,
+                inside = excluded.inside
+            """,
+            (max(0, int(entered)), max(0, int(exited)), max(0, int(inside))),
+        )
 
     def update_last_seen(self, global_person_ids: set[int], timestamp: float) -> None:
         with self._lock:

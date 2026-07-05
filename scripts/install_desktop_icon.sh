@@ -9,13 +9,13 @@ desktop_file_content() {
   cat <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Personenzähler
-Comment=YOLO26x Dual-Kamera Personenzähler starten
+Name=Personenzaehler
+Comment=YOLO26m Dual-Kamera Personenzaehler starten
 Exec=$PROJECT_DIR/scripts/start_gui.sh
 Path=$PROJECT_DIR
 Icon=camera-video
 Terminal=false
-Categories=Utility;Video;
+Categories=Utility;
 StartupNotify=true
 DESKTOP
 }

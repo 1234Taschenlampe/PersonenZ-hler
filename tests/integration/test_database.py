@@ -77,3 +77,14 @@ def test_exit_without_session_is_orphan_and_does_not_count(tmp_path: Path) -> No
     assert counts["inside"] == 0
     assert counts["exited"] == 0
     db.close()
+
+
+def test_set_global_counts_persists_live_counter_snapshot(tmp_path: Path) -> None:
+    db = EventDatabase(tmp_path / "events.sqlite3")
+    db.set_global_counts(entered=3, exited=1, inside=2)
+
+    counts = db.restore_counts()
+    assert counts["entered"] == 3
+    assert counts["exited"] == 1
+    assert counts["inside"] == 2
+    db.close()
