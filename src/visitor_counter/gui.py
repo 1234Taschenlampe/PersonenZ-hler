@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 import signal
@@ -44,6 +45,7 @@ from .logging_setup import configure_logging
 from .model_manager import ModelManager
 from .reid_manager import OSNetReIDManager
 from .types import FramePacket, RuntimeStats, TrackedObject
+from .video_stream import FrameStreamExporter
 
 LOGGER = logging.getLogger(__name__)
 
@@ -144,6 +146,9 @@ class MainWindow(QMainWindow):
         self.pipeline: ProcessingPipeline | None = None
         self.latest_raw_frames: dict[str, tuple[int, float, np.ndarray]] = {}
         self.latest_processed_frames: dict[str, tuple[float, np.ndarray]] = {}
+        self.stream_exporter = FrameStreamExporter(project_root)
+        self.live_status_path = project_root / "data" / "live_status.json"
+        self._last_live_status_write_at = 0.0
         self._next_raw_emit_at: dict[str, float] = {camera_id: 0.0 for camera_id in self.config.cameras}
         self._raw_gui_interval_seconds = 1.0 / 15.0
         self.camera_devices = discover_cameras()
@@ -545,6 +550,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802
         self.stop_processing()
+        self.stream_exporter.close()
         self._persist_settings()
         event.accept()
 
@@ -598,6 +604,8 @@ class MainWindow(QMainWindow):
         self.latest_raw_frames[camera_id] = (frame_id, captured_at, frame)
         if frame_id % 30 == 0:
             LOGGER.info("GUI_RECEIVE camera=%s frame=%s age_ms=%.1f", camera_id, frame_id, age_ms)
+        if time() - self.latest_processed_frames.get(camera_id, (0.0, frame))[0] > 0.75:
+            self.stream_exporter.submit(camera_id, frame, frame_id, "raw")
         self._render_frame(camera_id, frame, frame_id, "raw")
 
     def _on_frame_ready(self, camera_id: str, frame: object, tracks: list[TrackedObject]) -> None:
@@ -605,6 +613,7 @@ class MainWindow(QMainWindow):
         if isinstance(frame, np.ndarray):
             self.latest_processed_frames[camera_id] = (time(), frame)
             fallback_frame_id = self.latest_raw_frames.get(camera_id, (-1, 0.0, frame))[0]
+            self.stream_exporter.submit(camera_id, frame, fallback_frame_id, "processed")
             self._render_frame(camera_id, frame, fallback_frame_id, "processed")
 
     def _render_frame(self, camera_id: str, frame: np.ndarray, frame_id: int, source: str) -> None:
@@ -663,6 +672,79 @@ class MainWindow(QMainWindow):
             )
         self.status_labels["osnet_latency"].setText(f"{stats.reid_latency_ms:.1f} ms")
         self.status_labels["last_detection"].setText("-" if stats.last_detection_at is None else f"{time():.0f}")
+        self._write_live_status(stats, counts)
+
+    def _write_live_status(self, stats: RuntimeStats, counts: GlobalCounts) -> None:
+        now = time()
+        if now - self._last_live_status_write_at < 1.0:
+            return
+        self._last_live_status_write_at = now
+
+        cameras = []
+        captures = {capture.config.camera_id: capture for capture in self.captures}
+        for camera_id, camera_config in self.config.cameras.items():
+            capture = captures.get(camera_id)
+            counter = self.pipeline.counters.get(camera_id) if self.pipeline else None
+            frame_info = self.latest_raw_frames.get(camera_id)
+            last_frame_time = frame_info[1] if frame_info else None
+            camera_stats = capture.stats if capture else None
+            connected = bool(camera_stats.connected) if camera_stats else False
+            cameras.append(
+                {
+                    "camera_id": camera_id,
+                    "name": camera_config.display_name,
+                    "role": camera_config.role,
+                    "source": "USB" if camera_config.device else None,
+                    "device": camera_config.device,
+                    "wanted_fps": camera_config.fps,
+                    "width": camera_config.width,
+                    "height": camera_config.height,
+                    "status": "ONLINE" if connected else "OFFLINE",
+                    "actual_fps": round(camera_stats.fps, 1) if camera_stats else None,
+                    "last_frame_time": last_frame_time,
+                    "seconds_since_last_frame": round(now - last_frame_time, 3) if last_frame_time else None,
+                    "connected_seconds": None,
+                    "reconnect_count": None,
+                    "dropped_frames": camera_stats.dropped_frames if camera_stats else None,
+                    "decode_errors": None,
+                    "last_error": "" if connected else (camera_stats.last_error if camera_stats else "not started"),
+                    "visible": counter.counts.visible if counter else 0,
+                    "entered": counter.counts.entered if counter else 0,
+                    "exited": counter.counts.exited if counter else 0,
+                }
+            )
+
+        payload = {
+            "timestamp": now,
+            "counts": {
+                "inside": counts.inside,
+                "entered": counts.entered,
+                "exited": counts.exited,
+                "visible": stats.global_visible,
+                "suppressed": counts.suppressed_duplicates,
+                "uncertain": counts.uncertain_consensus,
+                "last_event_time": stats.last_detection_at,
+            },
+            "cameras": cameras,
+            "runtime": {
+                "inference_fps": round(stats.inference_fps, 1),
+                "hailo_latency_ms": round(stats.inference_latency_ms, 1),
+                "total_latency_ms": round(stats.total_latency_ms, 1),
+                "frame_age_ms": round(stats.frame_age_ms, 1),
+                "hailo_status": stats.hailo_status,
+                "hailo_device": stats.hailo_device,
+                "hailo_inference_count": stats.hailo_inference_count,
+                "active_hef": stats.active_hef,
+                "queue_length": stats.queue_length,
+            },
+        }
+        try:
+            self.live_status_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.live_status_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+            tmp_path.replace(self.live_status_path)
+        except OSError as exc:
+            LOGGER.warning("LIVE_STATUS_WRITE_FAILED path=%s error=%s", self.live_status_path, exc)
 
     def _poll_host_status(self) -> None:
         import os

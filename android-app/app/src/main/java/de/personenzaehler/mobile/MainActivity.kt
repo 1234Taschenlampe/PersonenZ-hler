@@ -1,18 +1,26 @@
 package de.personenzaehler.mobile
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.os.Build
 import android.os.Bundle
+import android.view.ViewGroup
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -66,6 +74,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
@@ -200,7 +209,7 @@ private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
         NavHost(navController, startDestination = Screen.Dashboard.route, modifier = Modifier.padding(padding)) {
             composable(Screen.Dashboard.route) { DashboardScreen(state) }
             composable(Screen.History.route) { HistoryScreen(state.status) }
-            composable(Screen.Cameras.route) { CamerasScreen(state.status?.cameras.orEmpty()) }
+            composable(Screen.Cameras.route) { CamerasScreen(state) }
             composable(Screen.Events.route) { EventsScreen(state, viewModel::setFilter) }
             composable(Screen.System.route) { SystemScreen(state.status, state) }
             composable(Screen.Settings.route) { SettingsScreen(state, viewModel) }
@@ -291,28 +300,131 @@ private fun HistoryScreen(status: ServerStatus?) {
 }
 
 @Composable
-private fun CamerasScreen(cameras: List<CameraSnapshot>) {
+private fun CamerasScreen(state: MobileUiState) {
+    val cameras = state.status?.cameras.orEmpty()
+    var selectedCameraId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedCamera = cameras.firstOrNull { it.cameraId == selectedCameraId }
+
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { SectionTitle("Kameras") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Videoquelle: ${state.settings.baseUrl}", fontWeight = FontWeight.Bold)
+                    Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"} | WebSocket: ${state.connection.webSocketStatus}")
+                    Text("Stream: MJPEG, max. 640 x 360, bis 10 FPS pro Kamera")
+                    state.connection.lastError?.let { Text("REST-Fehler: $it", color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+        if (selectedCamera != null && state.settings.configured) {
+            item {
+                CameraVideoCard(
+                    camera = selectedCamera,
+                    settings = state.settings,
+                    large = true,
+                    onSelect = { selectedCameraId = null },
+                )
+            }
+        }
         if (cameras.isEmpty()) {
             item { EmptyCard("Keine Kameradaten verfuegbar.") }
         }
         items(cameras) { camera ->
-            Card(colors = CardDefaults.cardColors(containerColor = if (camera.isWarning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant)) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(camera.name ?: camera.cameraId, fontWeight = FontWeight.Bold)
-                    Text("${camera.cameraId} | Rolle: ${camera.role ?: "N/A"} | Quelle: ${camera.source ?: "N/A"}")
-                    Text("Status: ${camera.status ?: "N/A"}")
-                    Text("Aufloesung: ${camera.width ?: "N/A"} x ${camera.height ?: "N/A"} | FPS Soll/Ist: ${camera.wantedFps ?: "N/A"} / ${formatDouble(camera.actualFps)}")
-                    Text("Letzter Frame: ${formatEpochSeconds(camera.lastFrameTime)} | seit ${formatDouble(camera.secondsSinceLastFrame, " s")}")
-                    Text("Verbunden: ${formatDuration(camera.connectedSeconds)} | Reconnects: ${formatInt(camera.reconnectCount)}")
-                    Text("Verworfen: ${formatInt(camera.droppedFrames)} | Decodefehler: ${formatInt(camera.decodeErrors)}")
-                    Text("Sichtbar: ${formatInt(camera.visible)} | In: ${formatInt(camera.entered)} | Out: ${formatInt(camera.exited)}")
-                    camera.lastError?.let { Text("Fehler: $it", color = MaterialTheme.colorScheme.error) }
-                }
-            }
+            CameraVideoCard(
+                camera = camera,
+                settings = state.settings,
+                large = false,
+                onSelect = { selectedCameraId = camera.cameraId },
+            )
         }
     }
+}
+
+@Composable
+private fun CameraVideoCard(
+    camera: CameraSnapshot,
+    settings: ServerSettings,
+    large: Boolean,
+    onSelect: () -> Unit,
+) {
+    val streamUrl = "${settings.baseUrl}/api/v1/video/${camera.cameraId}.mjpg?fps=${if (large) 12 else 8}"
+    val containerColor = if (camera.isWarning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
+    Card(colors = CardDefaults.cardColors(containerColor = containerColor)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text(camera.name ?: camera.cameraId, fontWeight = FontWeight.Bold)
+                    Text("${camera.cameraId} | Rolle: ${camera.role ?: "N/A"} | Quelle: ${camera.source ?: "N/A"}")
+                }
+                OutlinedButton(onClick = onSelect) {
+                    Text(if (large) "Schliessen" else "Gross")
+                }
+            }
+            if (settings.configured) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .background(Color.Black)
+                        .clickable { onSelect() },
+                ) {
+                    MjpegPreview(
+                        url = streamUrl,
+                        label = camera.name ?: camera.cameraId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            } else {
+                EmptyCard("Serveradresse fehlt. Bitte in Einstellungen speichern.")
+            }
+            Text("Status: ${camera.status ?: "N/A"} | Aufloesung: ${camera.width ?: "N/A"} x ${camera.height ?: "N/A"} | FPS Soll/Ist: ${camera.wantedFps ?: "N/A"} / ${formatDouble(camera.actualFps)}")
+            Text("Letzter Frame: ${formatEpochSeconds(camera.lastFrameTime)} | seit ${formatDouble(camera.secondsSinceLastFrame, " s")}")
+            Text("Sichtbar: ${formatInt(camera.visible)} | In: ${formatInt(camera.entered)} | Out: ${formatInt(camera.exited)}")
+            Text("Verbunden: ${formatDuration(camera.connectedSeconds)} | Reconnects: ${formatInt(camera.reconnectCount)} | Verworfen: ${formatInt(camera.droppedFrames)}")
+            camera.lastError?.let { Text("Fehler: $it", color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun MjpegPreview(url: String, label: String, modifier: Modifier = Modifier) {
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                webViewClient = WebViewClient()
+                settings.javaScriptEnabled = false
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
+                setBackgroundColor(android.graphics.Color.BLACK)
+            }
+        },
+        update = { webView ->
+            if (webView.tag != url) {
+                webView.tag = url
+                val html = """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                      <style>
+                        html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+                        img { width:100%; height:100%; object-fit:contain; display:block; }
+                      </style>
+                    </head>
+                    <body><img src="$url" alt="$label"></body>
+                    </html>
+                """.trimIndent()
+                webView.loadDataWithBaseURL(url, html, "text/html", "UTF-8", null)
+            }
+        },
+    )
 }
 
 @Composable

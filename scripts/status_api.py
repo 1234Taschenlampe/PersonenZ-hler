@@ -28,6 +28,7 @@ from visitor_counter.model_manager import ModelManager  # noqa: E402
 from visitor_counter.reid_manager import OSNetReIDManager  # noqa: E402
 
 LIVE_STATUS_PATH = PROJECT_ROOT / "data" / "live_status.json"
+STREAM_FRAME_DIR = PROJECT_ROOT / "data" / "stream_frames"
 _STATUS_CACHE_LOCK = threading.Lock()
 _STATUS_CACHE: tuple[float, dict] | None = None
 
@@ -94,6 +95,12 @@ def build_status(project_root: Path) -> dict:
             "version": "1",
             "pairing": "not_available",
             "websocket": "/api/v1/ws/live",
+            "video": {
+                "list": "/api/v1/video",
+                "mjpeg": "/api/v1/video/{camera_id}.mjpg",
+                "snapshot": "/api/v1/video/{camera_id}/snapshot.jpg",
+                "meta": "/api/v1/video/{camera_id}/meta",
+            },
         },
         "counts": counts,
         "cameras": cameras,
@@ -142,6 +149,55 @@ def cached_status(project_root: Path, max_age_seconds: float = 0.75) -> dict:
     with _STATUS_CACHE_LOCK:
         _STATUS_CACHE = (time(), status)
     return status
+
+
+def _safe_camera_id(camera_id: str) -> str | None:
+    camera_id = camera_id.strip()
+    if not camera_id:
+        return None
+    if all(char.isalnum() or char in {"_", "-"} for char in camera_id):
+        return camera_id
+    return None
+
+
+def _stream_paths(camera_id: str) -> tuple[Path, Path]:
+    return STREAM_FRAME_DIR / f"{camera_id}.jpg", STREAM_FRAME_DIR / f"{camera_id}.json"
+
+
+def _stream_meta(camera_id: str) -> dict | None:
+    jpg_path, meta_path = _stream_paths(camera_id)
+    if not jpg_path.exists():
+        return None
+    meta: dict = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            meta = {}
+    stat = jpg_path.stat()
+    meta.update(
+        {
+            "camera_id": camera_id,
+            "age_seconds": round(time() - stat.st_mtime, 3),
+            "snapshot": f"/api/v1/video/{camera_id}/snapshot.jpg",
+            "mjpeg": f"/api/v1/video/{camera_id}.mjpg",
+            "meta": f"/api/v1/video/{camera_id}/meta",
+        }
+    )
+    return meta
+
+
+def _available_streams() -> list[dict]:
+    if not STREAM_FRAME_DIR.exists():
+        return []
+    streams: list[dict] = []
+    for path in sorted(STREAM_FRAME_DIR.glob("*.jpg")):
+        camera_id = _safe_camera_id(path.stem)
+        if camera_id:
+            meta = _stream_meta(camera_id)
+            if meta:
+                streams.append(meta)
+    return streams
 
 
 def _version(project_root: Path) -> dict:
@@ -227,6 +283,11 @@ class StatusHandler(BaseHTTPRequestHandler):
         if route == "/api/v1/ws/live":
             self._handle_websocket()
             return
+        if route == "/api/v1/video":
+            self._send_json(200, {"streams": _available_streams()})
+            return
+        if route.startswith("/api/v1/video/") and self._handle_video(route, parsed.query):
+            return
         if route in {"/health", "/status", "/api/v1/health", "/api/v1/status"}:
             status = cached_status(self.project_root)
             code = 200 if status["hailo"]["device_detected"] else 503
@@ -275,6 +336,81 @@ class StatusHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return
+
+    def _handle_video(self, route: str, query_string: str) -> bool:
+        suffix = route.removeprefix("/api/v1/video/").strip("/")
+        if suffix.endswith(".mjpg"):
+            camera_id = _safe_camera_id(suffix.removesuffix(".mjpg"))
+            if not camera_id:
+                self._send_json(400, {"error": "invalid camera id"})
+                return True
+            query = parse_qs(query_string)
+            try:
+                fps = float(query.get("fps", ["10"])[0])
+            except ValueError:
+                fps = 10.0
+            self._send_mjpeg(camera_id, max(1.0, min(fps, 15.0)))
+            return True
+
+        parts = suffix.split("/")
+        if len(parts) != 2:
+            return False
+        camera_id = _safe_camera_id(parts[0])
+        if not camera_id:
+            self._send_json(400, {"error": "invalid camera id"})
+            return True
+        if parts[1] == "snapshot.jpg":
+            self._send_snapshot(camera_id)
+            return True
+        if parts[1] == "meta":
+            meta = _stream_meta(camera_id)
+            if meta:
+                self._send_json(200, meta)
+            else:
+                self._send_json(404, {"error": "stream frame not available", "camera_id": camera_id})
+            return True
+        return False
+
+    def _send_snapshot(self, camera_id: str) -> None:
+        jpg_path, _ = _stream_paths(camera_id)
+        if not jpg_path.exists():
+            self._send_json(404, {"error": "stream frame not available", "camera_id": camera_id})
+            return
+        body = jpg_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_mjpeg(self, camera_id: str, fps: float) -> None:
+        jpg_path, _ = _stream_paths(camera_id)
+        if not jpg_path.exists():
+            self._send_json(404, {"error": "stream frame not available", "camera_id": camera_id})
+            return
+        interval = 1.0 / fps
+        boundary = "personenzaehler-frame"
+        self.send_response(200)
+        self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Connection", "close")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        while True:
+            try:
+                body = jpg_path.read_bytes()
+                self.wfile.write(f"--{boundary}\r\n".encode("ascii"))
+                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                self.wfile.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
+                self.wfile.write(body)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+                sleep(interval)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
 
     def _send_json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
