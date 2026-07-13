@@ -2,15 +2,15 @@
 
 Goal: fine-tune the official YOLO26x detection checkpoint for a single `person` class using frames captured from the two real Logitech C920 cameras, then export ONNX and compile a HAILO10H HEF without replacing the working YOLO11x fallback until real tests prove parity or improvement.
 
-Raw images, videos, labels, checkpoints, ONNX, HAR and HEF files are intentionally ignored by Git. Keep raw data under:
+Raw images, videos, labels, checkpoints, ONNX, HAR and HEF files are intentionally ignored by Git. Use an encrypted, access-restricted path outside the repository and pass it explicitly with `--output`.
 
 ```text
-/home/raspibob/person_dataset_raw/
+[encrypted training volume]
 ```
 
 Required high-level phases:
 
-1. Capture representative two-camera footage with `training/scripts/capture_dataset.py`.
+1. Create a time-limited privacy approval JSON as described in `docs/PRIVACY_AND_SECURITY.md`, then capture footage with `--privacy-approval` and explicit `--output`.
 2. Extract sparse frames with `training/scripts/extract_frames.py`.
 3. Remove near-duplicates with `training/scripts/deduplicate_frames.py`.
 4. Annotate one class only: `0 person`.

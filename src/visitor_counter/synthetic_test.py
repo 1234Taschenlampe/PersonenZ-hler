@@ -105,7 +105,7 @@ def run_synthetic_counter_test(project_root: Path) -> int:
         print(f"Loops per thread: {loops_per_thread}")
         print(f"Expected Entered: {num_threads * loops_per_thread}")
         print(f"Expected Exited:  {num_threads * loops_per_thread}")
-        print(f"Expected Inside:  0")
+        print("Expected Inside:  0")
         print("-"*50)
         print(f"Actual Entered:   {counts['entered']}")
         print(f"Actual Exited:    {counts['exited']}")

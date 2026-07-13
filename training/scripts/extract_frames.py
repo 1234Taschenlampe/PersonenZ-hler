@@ -5,7 +5,7 @@ from pathlib import Path
 
 import cv2
 
-from common import utc_now, write_json
+from common import require_privacy_approval, secure_directory, secure_file, utc_now, write_json
 
 
 def main() -> int:
@@ -15,8 +15,10 @@ def main() -> int:
     parser.add_argument("--interval-seconds", type=float, default=2.0)
     parser.add_argument("--camera-id", required=True)
     parser.add_argument("--scenario", required=True)
+    parser.add_argument("--privacy-approval", type=Path, required=True)
     args = parser.parse_args()
-    args.output.mkdir(parents=True, exist_ok=True)
+    require_privacy_approval(args.privacy_approval)
+    secure_directory(args.output)
     cap = cv2.VideoCapture(str(args.input))
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {args.input}")
@@ -31,7 +33,8 @@ def main() -> int:
         if index % step == 0:
             path = args.output / f"{args.input.stem}_{index:08d}.jpg"
             cv2.imwrite(str(path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-            saved.append({"file": str(path), "source": str(args.input), "frame_index": index, "camera_id": args.camera_id, "scenario": args.scenario})
+            secure_file(path)
+            saved.append({"file": path.name, "frame_index": index, "camera_id": args.camera_id, "scenario": args.scenario})
         index += 1
     cap.release()
     write_json(args.output / "extract_manifest.json", {"created_at": utc_now(), "items": saved})

@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -102,6 +103,7 @@ import de.personenzaehler.mobile.util.formatInt
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         val launchIntent = intent
         setContent {
             PersonenzaehlerTheme {
@@ -123,7 +125,7 @@ class MainActivity : ComponentActivity() {
                     if (!host.isNullOrBlank()) {
                         viewModel.saveSettings(
                             state.settings.copy(
-                                scheme = launchIntent.getStringExtra("server_scheme") ?: "http",
+                                scheme = "https",
                                 host = host,
                                 port = launchIntent.getIntExtra("server_port", 8766),
                             ),
@@ -525,11 +527,11 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
         }
         OutlinedTextField(offlineWarn, { offlineWarn = it.filter(Char::isDigit) }, label = { Text("Offline-Warnung nach Sekunden") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(tempLimit, { tempLimit = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Temperaturgrenze C") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(token, { token = it }, label = { Text("Pairing-Code oder Token (optional)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(token, { token = it }, label = { Text("Zugriffstoken (mindestens 32 Zeichen)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
                 val settings = ServerSettings(
-                    scheme = if (scheme == "https") "https" else "http",
+                    scheme = "https",
                     host = host,
                     port = port.toIntOrNull() ?: 8766,
                     refreshSeconds = refresh.toIntOrNull() ?: 5,
@@ -557,7 +559,7 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
                     onClick = {
                         host = server.host
                         port = server.port.toString()
-                        scheme = "http"
+                        scheme = "https"
                         viewModel.useDiscoveredServer(server)
                     },
                     label = { Text("${server.name} | ${server.host}:${server.port}") },

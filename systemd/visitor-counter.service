@@ -1,7 +1,6 @@
 [Unit]
 Description=YOLO26x Dual-Camera Visitor Counter
-After=graphical.target network-online.target
-Wants=network-online.target
+After=graphical.target
 
 [Service]
 Type=simple
@@ -16,6 +15,16 @@ StartLimitIntervalSec=300
 KillSignal=SIGINT
 TimeoutStopSec=20
 Environment=PYTHONPATH=/home/raspibob/PersonenZ-hler/src
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=graphical.target

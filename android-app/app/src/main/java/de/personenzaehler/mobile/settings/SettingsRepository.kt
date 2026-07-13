@@ -20,7 +20,7 @@ class SettingsRepository(context: Context) {
 
     val settings: Flow<ServerSettings> = store.data.map { prefs ->
         ServerSettings(
-            scheme = prefs[Keys.Scheme] ?: "http",
+            scheme = prefs[Keys.Scheme] ?: "https",
             host = prefs[Keys.Host] ?: "",
             port = prefs[Keys.Port] ?: 8766,
             refreshSeconds = prefs[Keys.RefreshSeconds] ?: 5,
@@ -35,7 +35,7 @@ class SettingsRepository(context: Context) {
 
     suspend fun save(settings: ServerSettings) {
         store.edit { prefs ->
-            prefs[Keys.Scheme] = settings.scheme
+            prefs[Keys.Scheme] = "https"
             prefs[Keys.Host] = settings.host.trim()
             prefs[Keys.Port] = settings.port.coerceIn(1, 65_535)
             prefs[Keys.RefreshSeconds] = settings.refreshSeconds.coerceIn(1, 300)

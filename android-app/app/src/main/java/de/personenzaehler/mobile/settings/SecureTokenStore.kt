@@ -21,7 +21,9 @@ class SecureTokenStore(context: Context) {
     fun readToken(): String? = prefs.getString(KEY_TOKEN, null)?.takeIf { it.isNotBlank() }
 
     fun saveToken(token: String) {
-        prefs.edit().putString(KEY_TOKEN, token.trim()).apply()
+        val normalized = token.trim()
+        require(normalized.length >= 32) { "Token must contain at least 32 characters" }
+        prefs.edit().putString(KEY_TOKEN, normalized).apply()
     }
 
     fun clearToken() {

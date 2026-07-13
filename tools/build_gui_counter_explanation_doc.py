@@ -48,10 +48,8 @@ def annotate_screenshot() -> None:
 
     try:
         font = ImageFont.truetype("arial.ttf", 24)
-        small = ImageFont.truetype("arial.ttf", 18)
     except OSError:
         font = ImageFont.load_default()
-        small = ImageFont.load_default()
 
     def label_box(xy, label: str, color: tuple[int, int, int], fill: tuple[int, int, int]) -> None:
         x1, y1, x2, y2 = xy

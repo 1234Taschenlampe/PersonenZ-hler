@@ -37,12 +37,13 @@ from PySide6.QtWidgets import (
 )
 
 from .camera_manager import CameraCapture, CameraDeviceInfo, LatestFrameHub, discover_camera_devices, discover_cameras
-from .configuration import AppConfig, load_config, save_config
+from .configuration import load_config, privacy_readiness_errors, save_config
 from .counter import GlobalCounts
 from .diagnostics import collect_diagnostics, read_pi_temperature_c
 from .inference_pipeline import ProcessingPipeline
 from .logging_setup import configure_logging
 from .model_manager import ModelManager
+from .privacy import anonymize_frame, hidden_preview
 from .reid_manager import OSNetReIDManager
 from .types import FramePacket, RuntimeStats, TrackedObject
 from .video_stream import FrameStreamExporter
@@ -146,7 +147,13 @@ class MainWindow(QMainWindow):
         self.pipeline: ProcessingPipeline | None = None
         self.latest_raw_frames: dict[str, tuple[int, float, np.ndarray]] = {}
         self.latest_processed_frames: dict[str, tuple[float, np.ndarray]] = {}
-        self.stream_exporter = FrameStreamExporter(project_root)
+        self.stream_exporter = FrameStreamExporter(
+            project_root,
+            enabled=self.config.privacy.video_stream_enabled,
+            anonymization_mode=self.config.display.anonymization_mode,
+            pixel_size=self.config.display.pixel_size,
+            remove_on_shutdown=self.config.privacy.remove_stream_frames_on_shutdown,
+        )
         self.live_status_path = project_root / "data" / "live_status.json"
         self._last_live_status_write_at = 0.0
         self._next_raw_emit_at: dict[str, float] = {camera_id: 0.0 for camera_id in self.config.cameras}
@@ -341,6 +348,11 @@ class MainWindow(QMainWindow):
     def start_processing(self) -> None:
         if any(capture.is_alive() for capture in self.captures) or (self.pipeline and self.pipeline.is_alive()):
             return
+        readiness_errors = privacy_readiness_errors(self.config)
+        if readiness_errors:
+            LOGGER.error("PRIVACY_READINESS_BLOCKED issues=%s", len(readiness_errors))
+            self.fallback_label.setText("Datenschutz-Freigabe fehlt: " + " | ".join(readiness_errors))
+            return
         self._repair_camera_assignments()
         self.stop_event = Event()
         self.frame_queue = LatestFrameHub(list(self.config.cameras))
@@ -506,7 +518,7 @@ class MainWindow(QMainWindow):
             if not ok or frame is None:
                 self._show_warning("Kamera konnte kein Bild liefern.")
                 return
-            self.views[camera_id].set_frame(frame)
+            self.views[camera_id].set_frame(self._privacy_display_frame(frame, ()))
             QMessageBox.information(self, "Kameratest", f"{camera_id} liefert ein Bild von {device}.")
         finally:
             cap.release()
@@ -571,7 +583,7 @@ class MainWindow(QMainWindow):
         if now < self._next_raw_emit_at.get(packet.camera_id, 0.0):
             return
         self._next_raw_emit_at[packet.camera_id] = now + self._raw_gui_interval_seconds
-        frame = packet.image.copy()
+        frame = self._privacy_display_frame(packet.image, ())
         if self.config.display.raw_frame_overlay:
             self._draw_raw_overlay(packet, frame)
         self.raw_frame_ready.emit(packet.camera_id, frame, packet.frame_id, packet.captured_at)
@@ -601,20 +613,31 @@ class MainWindow(QMainWindow):
         if not isinstance(frame, np.ndarray):
             return
         age_ms = (time() - captured_at) * 1000.0
-        self.latest_raw_frames[camera_id] = (frame_id, captured_at, frame)
+        display_frame = self._privacy_display_frame(frame, ())
+        self.latest_raw_frames[camera_id] = (frame_id, captured_at, display_frame)
         if frame_id % 30 == 0:
             LOGGER.info("GUI_RECEIVE camera=%s frame=%s age_ms=%.1f", camera_id, frame_id, age_ms)
         if time() - self.latest_processed_frames.get(camera_id, (0.0, frame))[0] > 0.75:
-            self.stream_exporter.submit(camera_id, frame, frame_id, "raw")
-        self._render_frame(camera_id, frame, frame_id, "raw")
+            self.stream_exporter.submit(camera_id, frame)
+        self._render_frame(camera_id, display_frame, frame_id, "raw")
 
     def _on_frame_ready(self, camera_id: str, frame: object, tracks: list[TrackedObject]) -> None:
-        _ = tracks
         if isinstance(frame, np.ndarray):
-            self.latest_processed_frames[camera_id] = (time(), frame)
+            display_frame = self._privacy_display_frame(frame, tracks)
+            self.latest_processed_frames[camera_id] = (time(), display_frame)
             fallback_frame_id = self.latest_raw_frames.get(camera_id, (-1, 0.0, frame))[0]
-            self.stream_exporter.submit(camera_id, frame, fallback_frame_id, "processed")
-            self._render_frame(camera_id, frame, fallback_frame_id, "processed")
+            self.stream_exporter.submit(camera_id, frame, tracks)
+            self._render_frame(camera_id, display_frame, fallback_frame_id, "processed")
+
+    def _privacy_display_frame(self, frame: np.ndarray, tracks: tuple | list) -> np.ndarray:
+        if not self.config.display.show_camera_preview:
+            return hidden_preview(frame)
+        return anonymize_frame(
+            frame,
+            mode=self.config.display.anonymization_mode,
+            pixel_size=self.config.display.pixel_size,
+            tracks=tracks,
+        )
 
     def _render_frame(self, camera_id: str, frame: np.ndarray, frame_id: int, source: str) -> None:
         try:
@@ -743,6 +766,10 @@ class MainWindow(QMainWindow):
             tmp_path = self.live_status_path.with_suffix(".json.tmp")
             tmp_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
             tmp_path.replace(self.live_status_path)
+            try:
+                self.live_status_path.chmod(0o600)
+            except OSError:
+                pass
         except OSError as exc:
             LOGGER.warning("LIVE_STATUS_WRITE_FAILED path=%s error=%s", self.live_status_path, exc)
 
@@ -902,7 +929,7 @@ class SetupWizard(QDialog):
             try:
                 ok, frame = cap.read()
                 if ok and frame is not None:
-                    preview.set_frame(frame)
+                    preview.set_frame(self.main_window._privacy_display_frame(frame, ()))
             finally:
                 cap.release()
 

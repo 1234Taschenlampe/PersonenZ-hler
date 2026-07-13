@@ -113,12 +113,54 @@ class TimeoutConfig:
 class DatabaseConfig:
     path: str = "data/person_counter.sqlite3"
     store_video_frames: bool = False
+    store_events: bool = False
+    retention_hours: int = 24
+    encryption_required: bool = True
+    encryption_key_env: str = "VISITOR_COUNTER_DATA_KEY"
+    encryption_key_file: str = ""
 
 
 @dataclass
 class DisplayConfig:
     display_raw_frames_only: bool = False
     raw_frame_overlay: bool = True
+    show_camera_preview: bool = False
+    anonymization_mode: str = "full_frame"
+    pixel_size: int = 24
+
+
+@dataclass
+class PrivacyConfig:
+    enabled: bool = True
+    local_processing_only: bool = True
+    telemetry_enabled: bool = False
+    video_stream_enabled: bool = False
+    remove_stream_frames_on_shutdown: bool = True
+    privacy_notice_acknowledged: bool = False
+    privacy_notice_acknowledged_at: str = ""
+    legal_basis: str = ""
+    purpose: str = "anonymous occupancy counting"
+    controller_name: str = ""
+    controller_contact: str = ""
+    consent_required: bool = False
+    consent_recorded: bool = False
+
+
+@dataclass
+class ApiConfig:
+    enabled: bool = True
+    bind_host: str = "127.0.0.1"
+    port: int = 8766
+    require_auth: bool = True
+    viewer_token_env: str = "VISITOR_COUNTER_VIEWER_TOKEN"
+    operator_token_env: str = "VISITOR_COUNTER_OPERATOR_TOKEN"
+    admin_token_env: str = "VISITOR_COUNTER_ADMIN_TOKEN"
+    minimum_token_length: int = 32
+    tls_certificate: str = ""
+    tls_private_key: str = ""
+    allowed_origins: list[str] = field(default_factory=list)
+    max_requests_per_minute: int = 120
+    audit_retention_days: int = 30
 
 
 @dataclass
@@ -144,6 +186,8 @@ class AppConfig:
     timeout: TimeoutConfig = field(default_factory=TimeoutConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
+    privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
+    api: ApiConfig = field(default_factory=ApiConfig)
 
 
 def _camera_from_dict(camera_id: str, data: dict[str, Any]) -> CameraConfig:
@@ -195,6 +239,8 @@ def load_config(path: Path) -> AppConfig:
         timeout=TimeoutConfig(**merged.get("timeout", {})),
         database=DatabaseConfig(**merged.get("database", {})),
         display=DisplayConfig(**merged.get("display", {})),
+        privacy=PrivacyConfig(**merged.get("privacy", {})),
+        api=ApiConfig(**merged.get("api", {})),
     )
 
 
@@ -203,6 +249,10 @@ def save_config(config: AppConfig, path: Path) -> None:
         raise RuntimeError("PyYAML is required to write config/config.yaml")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(asdict(config), sort_keys=False), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def validate_config(config: AppConfig) -> list[str]:
@@ -219,8 +269,6 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Model fallback must be disabled for production YOLO26 operation.")
     if not config.model.require_custom_yolo26m:
         errors.append("Production runtime must require the approved YOLO26 HEF.")
-    if not config.model.reid_required:
-        errors.append("Production runtime must require OSNet ReID HEF.")
     if config.model.hef_path != config.model.custom_target_hef_path:
         errors.append(f"Configured detector HEF must be {config.model.custom_target_hef_path}.")
     if config.model.target_hef_path != config.model.custom_target_hef_path:
@@ -245,4 +293,48 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Consensus transition window must be positive.")
     if config.timeout.presence_timeout_minutes <= 0:
         errors.append("Presence timeout minutes must be positive.")
+    if config.database.store_video_frames:
+        errors.append("Persisting video frames is prohibited; keep database.store_video_frames disabled.")
+    if config.database.retention_hours <= 0 or config.database.retention_hours > 168:
+        errors.append("Database retention_hours must be between 1 and 168 hours.")
+    if config.database.store_events and config.database.encryption_required and not (
+        config.database.encryption_key_env or config.database.encryption_key_file
+    ):
+        errors.append("Stored events require an encryption key environment variable or key file.")
+    if config.display.anonymization_mode not in {"full_frame", "persons", "none"}:
+        errors.append("Display anonymization_mode must be full_frame, persons, or none.")
+    if config.privacy.enabled and config.display.show_camera_preview and config.display.anonymization_mode == "none":
+        errors.append("Privacy mode forbids an unmasked camera preview.")
+    if config.privacy.video_stream_enabled and config.display.anonymization_mode != "full_frame":
+        errors.append("Remote video requires full-frame anonymization because license plates are not detected.")
+    if not config.privacy.local_processing_only:
+        errors.append("Local-only processing is a mandatory secure default.")
+    if config.privacy.telemetry_enabled:
+        errors.append("External telemetry must remain disabled.")
+    if config.privacy.consent_required and not config.privacy.consent_recorded:
+        errors.append("Consent is configured as the legal basis but has not been recorded.")
+    if not 1 <= config.api.port <= 65_535:
+        errors.append("API port must be between 1 and 65535.")
+    if config.api.minimum_token_length < 32:
+        errors.append("API tokens must be at least 32 characters long.")
+    if config.api.bind_host not in {"127.0.0.1", "::1", "localhost"} and not (
+        config.api.tls_certificate and config.api.tls_private_key and config.api.require_auth
+    ):
+        errors.append("Non-loopback API binding requires TLS and authentication.")
+    return errors
+
+
+def privacy_readiness_errors(config: AppConfig) -> list[str]:
+    """Return operator actions required before camera processing may start."""
+    errors = validate_config(config)
+    if not config.privacy.enabled:
+        errors.append("Privacy mode must be enabled for production camera processing.")
+    if not config.privacy.privacy_notice_acknowledged:
+        errors.append("Confirm that the required privacy notice is visibly installed.")
+    if not config.privacy.privacy_notice_acknowledged_at.strip():
+        errors.append("Record when the privacy notice was acknowledged.")
+    if not config.privacy.legal_basis.strip():
+        errors.append("Document the assessed legal basis before enabling cameras.")
+    if not config.privacy.controller_name.strip() or not config.privacy.controller_contact.strip():
+        errors.append("Document the controller name and privacy contact.")
     return errors

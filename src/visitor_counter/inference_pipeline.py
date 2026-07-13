@@ -12,12 +12,14 @@ import cv2
 from .camera_manager import LatestFrameHub
 from .configuration import AppConfig
 from .counter import GlobalCounts, LineCrossingCounter
+from .data_protection import load_data_protector
 from .database import EventDatabase
 from .dual_camera_consensus import DualCameraConsensus
 from .hailo_manager import HailoManager, HailoUnavailableError
 from .identity_manager import GlobalIdentityManager
 from .model_manager import ModelManager, ModelUnavailableError
 from .obstruction import CameraObstructionDetector
+from .privacy import anonymize_frame, hidden_preview
 from .reid_manager import OSNetReIDManager
 from .tracker import create_tracker
 from .types import ConsensusDecision, CountingLine, Detection, FramePacket, LatencyWindow, RuntimeStats, TrackedObject
@@ -57,7 +59,14 @@ class ProcessingPipeline(Thread):
         self.latency_window = LatencyWindow()
         self.global_counts = GlobalCounts()
         self.model = ModelManager(config.model, project_root)
-        self.database = EventDatabase(project_root / config.database.path)
+        protector = load_data_protector(config.database, project_root)
+        self.database = EventDatabase(
+            project_root / config.database.path,
+            store_personal_events=config.database.store_events,
+            retention_hours=config.database.retention_hours,
+            protector=protector,
+            require_encryption=config.database.encryption_required,
+        )
         self._restore_counts()
         self.consensus = DualCameraConsensus(config.consensus)
         self.reid = OSNetReIDManager(config.model, project_root)
@@ -84,6 +93,7 @@ class ProcessingPipeline(Thread):
         self._inside_global_person_ids: set[int] = set()
         self._live_presence: dict[int, _LivePresenceMemory] = {}
         self._last_persisted_global_counts: tuple[int, int, int] | None = None
+        self._last_retention_purge_at = 0.0
 
     def run(self) -> None:
         LOGGER.info("Starting processing pipeline")
@@ -164,17 +174,14 @@ class ProcessingPipeline(Thread):
                 if event.global_person_id is None:
                     decision = ConsensusDecision(event, False, decision.duplicate_of, True, "missing global person id")
                 
-                prev_inside = self.global_counts.inside
-                event_id = self.database.record_decision(decision, self.config.model.model_name, self.runtime_stats.total_latency_ms)
-                new_inside = self.global_counts.inside
+                self.database.record_decision(decision, self.config.model.model_name, self.runtime_stats.total_latency_ms)
                 
                 camera_num = 1 if packet.camera_id == "camera_1" else 2
                 if decision.counted and not decision.uncertain:
-                    LOGGER.info("COUNT_EVENT event_id=%s camera=%s track_id=%s direction=%s previous_global_inside=%s new_global_inside=%s",
-                                event_id, camera_num, event.local_track_id, event.direction.value, prev_inside, new_inside)
+                    LOGGER.info("COUNT_EVENT camera=%s direction=%s", camera_num, event.direction.value)
                 else:
                     reason = decision.reason or "suppressed_or_uncertain"
-                    LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=%s", camera_num, event.local_track_id, reason)
+                    LOGGER.info("COUNT_REJECTED camera=%s reason=%s", camera_num, reason)
                 
                 LOGGER.info("GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
                             self.global_counts.inside, self.global_counts.entered, self.global_counts.exited)
@@ -269,11 +276,9 @@ class ProcessingPipeline(Thread):
             self._inside_global_person_ids.add(global_id)
             self.global_counts.entered += 1
             LOGGER.info(
-                "LIVE_GLOBAL_COUNTER entered_ids=[%s] inside=%s entered_total=%s frames_seen=%s",
-                global_id,
+                "LIVE_GLOBAL_COUNTER event=entry inside=%s entered_total=%s",
                 len(self._inside_global_person_ids),
                 self.global_counts.entered,
-                memory.frames_seen,
             )
 
         exited: list[int] = []
@@ -292,8 +297,8 @@ class ProcessingPipeline(Thread):
         self.global_counts.inside = len(self._inside_global_person_ids)
         if exited:
             LOGGER.info(
-                "LIVE_GLOBAL_COUNTER exited_ids=%s inside=%s exited_total=%s",
-                sorted(exited),
+                "LIVE_GLOBAL_COUNTER event=exit count=%s inside=%s exited_total=%s",
+                len(exited),
                 self.global_counts.inside,
                 self.global_counts.exited,
             )
@@ -359,6 +364,10 @@ class ProcessingPipeline(Thread):
         self.runtime_stats.timeouts = restored["timeouts"]
 
     def _run_timeout_check(self) -> None:
+        now = monotonic()
+        if now - self._last_retention_purge_at >= 300.0:
+            self.database.purge_expired()
+            self._last_retention_purge_at = now
         if not self.config.timeout.presence_timeout_enabled:
             return
         result = self.database.close_timed_out_sessions(self.config.timeout.presence_timeout_minutes)
@@ -390,12 +399,8 @@ class ProcessingPipeline(Thread):
             if detections:
                 self.runtime_stats.last_detection_at = monotonic()
             
-            # Log DETECTION event
-            camera_num = 1 if packet.camera_id == "camera_1" else 2
-            for det in detections:
-                LOGGER.info("DETECTION camera=%s frame=%s class_id=0 confidence=%.2f bbox=%s",
-                            camera_num, packet.frame_id, det.confidence, 
-                            (int(det.bbox.x1), int(det.bbox.y1), int(det.bbox.x2), int(det.bbox.y2)))
+            if detections:
+                LOGGER.debug("DETECTION camera=%s count=%s", packet.camera_id, len(detections))
             return detections
         except HailoUnavailableError as exc:
             self.runtime_stats.hailo_status = str(exc)
@@ -455,6 +460,15 @@ class ProcessingPipeline(Thread):
                 (0, 255, 120),
                 2,
                 cv2.LINE_AA,
+            )
+        if self.config.privacy.enabled:
+            if not self.config.display.show_camera_preview and not self.config.privacy.video_stream_enabled:
+                return hidden_preview(image)
+            return anonymize_frame(
+                image,
+                mode=self.config.display.anonymization_mode,
+                pixel_size=self.config.display.pixel_size,
+                tracks=tracks,
             )
         return image
 

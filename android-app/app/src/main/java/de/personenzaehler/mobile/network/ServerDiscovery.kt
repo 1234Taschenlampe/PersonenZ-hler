@@ -13,7 +13,7 @@ data class DiscoveredServer(val name: String, val host: String, val port: Int)
 class ServerDiscovery(context: Context) {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-    private val serviceTypes = listOf("_personenzaehler._tcp.", "_http._tcp.")
+    private val serviceTypes = listOf("_personenzaehler._tcp.")
 
     fun discover(): Flow<DiscoveredServer> = callbackFlow {
         val multicastLock = wifiManager?.createMulticastLock("personenzaehler-nsd").also {

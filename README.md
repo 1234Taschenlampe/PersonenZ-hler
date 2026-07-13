@@ -41,6 +41,8 @@ Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen. Me
 
 ## Programmstart
 
+Vor dem ersten Kamerastart muessen Rechtsgrundlage, Zweck, Verantwortlicher, Kontakt und der sichtbar angebrachte Datenschutzhinweis in `config/config.yaml` dokumentiert werden. Ohne diese Freigabe startet die Kameraverarbeitung nicht. Details: [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
+
 ```bash
 ./scripts/start.sh
 ```
@@ -70,7 +72,7 @@ Der Launcher verwendet `scripts/start_gui.sh`, startet den vorhandenen `visitor-
 
 ## GUI-Bedienung
 
-Die Anwendung zeigt Kamera 1 links und Kamera 2 rechts. Sie zeigt Livebilder, Zaehlwerte, Modellstatus, Kameraauswahl, Diagnosewerte und Steuerbuttons.
+Die Anwendung zeigt standardmaessig keine Livebilder. Die Kameraflaechen bleiben im Datenschutzmodus verdeckt; Zaehler, Modellstatus, Kameraauswahl und Diagnosewerte bleiben sichtbar. Eine Vorschau muss bewusst aktiviert werden und bleibt anonymisiert.
 
 Wichtige Zaehlwerte:
 
@@ -85,13 +87,13 @@ Wichtige Zaehlwerte:
 
 Die globale Live-Zaehlung ist von der Anzeige sichtbarer Personen getrennt. Eine Person wird erst nach mehreren bestaetigten Frames als `inside` gezaehlt. Wenn sie verschwindet, wartet die Pipeline eine kurze Grace-Zeit, bevor `inside` sinkt und `global out` steigt.
 
-Vor Tracking und ReID werden nur echte Personendetektionen mit ausreichender Konfidenz, sinnvoller Groesse und plausibler Box-Form verwendet. Dadurch werden kurze Fehlklassifikationen und Tracker-Flackern nicht direkt gezaehlt.
+Vor Tracking werden nur echte Personendetektionen mit ausreichender Konfidenz, sinnvoller Groesse und plausibler Box-Form verwendet. Re-ID ist im sicheren Standard deaktiviert.
 
 Es werden keine Gesichter erkannt, keine Namen gespeichert und keine dauerhaften biometrischen Gesichtsdaten abgelegt.
 
 ## Datenbank
 
-Die lokale SQLite-Datenbank nutzt WAL-Modus, Foreign Keys, Transaktionen und idempotente Initialisierung. Live-Global-Counter werden in `global_counts` gespiegelt, damit GUI und Neustart dieselben Werte sehen.
+Die lokale SQLite-Datenbank speichert standardmaessig nur aggregierte Zaehler. Granulare Ereignisse sind aus; optional aktivierte Ereignisse erfordern einen externen Verschluesselungsschluessel, werden pseudonymisiert und nach kurzer Frist automatisch geloescht.
 
 ## Tests
 
@@ -106,6 +108,8 @@ Hardwaretests auf dem Raspberry Pi:
 ```bash
 pytest -m hardware
 ```
+
+Secret-Erzeugung, TLS, Rollen, Export und Loeschung sind in [docs/PRIVACY_AND_SECURITY.md](docs/PRIVACY_AND_SECURITY.md) beschrieben.
 
 ## Deployment auf den Raspberry Pi
 

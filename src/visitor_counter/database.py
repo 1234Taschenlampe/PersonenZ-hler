@@ -7,6 +7,7 @@ import sqlite3
 import threading
 from time import time
 
+from .data_protection import DataProtector
 from .types import ConsensusDecision, Direction
 
 LOGGER = logging.getLogger(__name__)
@@ -18,16 +19,46 @@ class TimeoutResult:
 
 
 class EventDatabase:
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        store_personal_events: bool = True,
+        retention_hours: int = 24,
+        protector: DataProtector | None = None,
+        require_encryption: bool = False,
+    ) -> None:
         self.path = path
+        self.store_personal_events = store_personal_events
+        self.retention_hours = retention_hours
+        self.protector = protector
+        if store_personal_events and require_encryption and protector is None:
+            raise RuntimeError("Personal event storage requires the configured data encryption key.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.is_symlink():
+            raise RuntimeError(f"Refusing a symlinked database path: {self.path}")
+        try:
+            self.path.parent.chmod(0o700)
+        except OSError:
+            pass
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
+        try:
+            self.path.chmod(0o600)
+        except OSError:
+            pass
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=NORMAL")
         self._connection.execute("PRAGMA busy_timeout=5000")
         self._connection.execute("PRAGMA foreign_keys=ON")
+        self._connection.execute("PRAGMA secure_delete=ON")
+        self._connection.execute("PRAGMA trusted_schema=OFF")
         self._migrate()
+        if not self.store_personal_events:
+            self.delete_personal_data(reset_aggregates=False)
+        elif self.protector is not None:
+            self._protect_existing_rows()
+        self.purge_expired()
 
     def close(self) -> None:
         with self._lock:
@@ -68,15 +99,17 @@ class EventDatabase:
             except sqlite3.OperationalError:
                 pass
 
-        # Backup the database file if migrating from version 1
+        # Never create an unencrypted copy of legacy personal data.
         if self.path.exists() and schema_version == 1:
-            import shutil
-            backup_path = self.path.parent / f"{self.path.name}.backup_{int(time())}"
+            if self.protector is None:
+                raise RuntimeError("A data encryption key is required to migrate the legacy personal-event database.")
+            backup_path = self.path.parent / f"{self.path.name}.backup_{int(time())}.fernet"
+            backup_path.write_bytes(self.protector.encrypt_bytes(self.path.read_bytes()))
             try:
-                shutil.copy2(self.path, backup_path)
-                LOGGER.info("DATABASE_MIGRATION_BACKUP created at: %s", backup_path)
-            except Exception as e:
-                LOGGER.error("DATABASE_MIGRATION_BACKUP_FAILED: %s", e)
+                backup_path.chmod(0o600)
+            except OSError:
+                pass
+            LOGGER.info("DATABASE_MIGRATION_BACKUP_CREATED encrypted=true")
 
         self._connection.execute("BEGIN IMMEDIATE")
         try:
@@ -292,11 +325,14 @@ class EventDatabase:
             self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def record_decision(self, decision: ConsensusDecision, model_name: str, processing_ms: float | None = None) -> int:
+        if not self.store_personal_events:
+            return 0
         with self._lock:
             return self._run_transaction(self._record_decision_tx, decision, model_name, processing_ms)
 
     def _record_decision_tx(self, decision: ConsensusDecision, model_name: str, processing_ms: float | None = None) -> int:
         event = decision.event
+        stored_global_id = self._protected_id("person", event.global_person_id)
         cursor = self._connection.execute(
             """
             INSERT OR IGNORE INTO counting_events (
@@ -306,49 +342,54 @@ class EventDatabase:
             """,
             (
                 event.timestamp,
-                event.camera_id,
-                event.local_track_id,
-                event.global_person_id,
+                self._protected_text(event.camera_id),
+                self._protected_id("track", event.local_track_id),
+                stored_global_id,
                 event.session_id,
-                event.passage_id,
+                self._protected_pseudonym("passage", event.passage_id),
                 event.direction.value,
                 "uncertain" if decision.uncertain else "crossing",
                 int(decision.counted),
                 int(decision.uncertain),
-                decision.reason,
+                self._protected_text(decision.reason),
                 event.confidence,
-                model_name,
+                self._protected_text(model_name),
                 processing_ms,
                 time(),
             ),
         )
         if cursor.rowcount == 0:
-            self.record_diagnostic("info", "duplicate_passage_event", "Duplicate passage event suppressed", event.global_person_id, event.session_id)
+            self._record_diagnostic_tx(
+                "info", "duplicate_passage_event", "Duplicate passage event suppressed", stored_global_id, event.session_id
+            )
             return 0
         event_id = int(cursor.lastrowid)
-        self._upsert_person(event.global_person_id, event.timestamp)
-        if decision.counted and not decision.uncertain and event.global_person_id is not None:
+        self._upsert_person(stored_global_id, event.timestamp)
+        if decision.counted and not decision.uncertain and stored_global_id is not None:
             if event.direction == Direction.IN:
-                if self._open_session(event.global_person_id, event.timestamp, event.camera_id, event_id, event.confidence):
+                if self._open_session(stored_global_id, event.timestamp, event.camera_id, event_id, event.confidence):
                     self._connection.execute(
                         "UPDATE global_counts SET entered = entered + 1, inside = inside + 1 WHERE id = 1"
                     )
                 else:
                     self._connection.execute("UPDATE counting_events SET counted = 0, event_type = 'duplicate_entry' WHERE id = ?", (event_id,))
             elif event.direction == Direction.OUT:
-                if self._close_session(event.global_person_id, event.timestamp, event.camera_id, event_id, "camera_exit"):
+                if self._close_session(stored_global_id, event.timestamp, event.camera_id, event_id, "camera_exit"):
                     self._connection.execute(
                         "UPDATE global_counts SET exited = exited + 1, inside = CASE WHEN inside > 0 THEN inside - 1 ELSE 0 END WHERE id = 1"
                     )
                 else:
                     self._connection.execute("UPDATE counting_events SET counted = 0, event_type = 'orphan_exit' WHERE id = ?", (event_id,))
         elif decision.uncertain:
-            self.record_diagnostic("warning", "uncertain_event", decision.reason, event.global_person_id, event.session_id)
+            self._record_diagnostic_tx("warning", "uncertain_event", decision.reason, stored_global_id, event.session_id)
         return event_id
 
     def record_diagnostic(self, severity: str, code: str, message: str, global_person_id: int | None = None, session_id: int | None = None) -> None:
+        if not self.store_personal_events:
+            return
         with self._lock:
-            self._run_transaction(self._record_diagnostic_tx, severity, code, message, global_person_id, session_id)
+            stored_global_id = self._protected_id("person", global_person_id)
+            self._run_transaction(self._record_diagnostic_tx, severity, code, message, stored_global_id, session_id)
 
     def _record_diagnostic_tx(self, severity: str, code: str, message: str, global_person_id: int | None = None, session_id: int | None = None) -> None:
         self._connection.execute(
@@ -356,7 +397,7 @@ class EventDatabase:
             INSERT INTO diagnostic_events(timestamp, severity, code, message, global_person_id, session_id)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (time(), severity, code, message, global_person_id, session_id),
+            (time(), severity, code, self._protected_text(message), global_person_id, session_id),
         )
 
     def restore_counts(self) -> dict[str, int]:
@@ -406,8 +447,11 @@ class EventDatabase:
         )
 
     def update_last_seen(self, global_person_ids: set[int], timestamp: float) -> None:
+        if not self.store_personal_events:
+            return
         with self._lock:
-            self._run_transaction(self._update_last_seen_tx, global_person_ids, timestamp)
+            protected = {value for value in (self._protected_id("person", item) for item in global_person_ids) if value is not None}
+            self._run_transaction(self._update_last_seen_tx, protected, timestamp)
 
     def _update_last_seen_tx(self, global_person_ids: set[int], timestamp: float) -> None:
         for global_person_id in global_person_ids:
@@ -418,6 +462,8 @@ class EventDatabase:
             )
 
     def close_timed_out_sessions(self, timeout_minutes: int, now: float | None = None) -> TimeoutResult:
+        if not self.store_personal_events:
+            return TimeoutResult(0, None)
         with self._lock:
             return self._run_transaction(self._close_timed_out_sessions_tx, timeout_minutes, now)
 
@@ -446,7 +492,9 @@ class EventDatabase:
                     "INSERT OR IGNORE INTO timeout_events(session_id, global_person_id, timeout_at, timeout_minutes, created_at) VALUES (?, ?, ?, ?, ?)",
                     (session_id, global_person_id, now, timeout_minutes, now),
                 )
-                self.record_diagnostic("info", "presence_timeout", "Session closed by inactivity timeout", global_person_id, session_id)
+                self._record_diagnostic_tx(
+                    "info", "presence_timeout", "Session closed by inactivity timeout", global_person_id, session_id
+                )
                 closed += 1
                 last_timeout_at = now
         if closed > 0:
@@ -464,6 +512,166 @@ class EventDatabase:
     def table_names(self) -> list[str]:
         with self._lock:
             return [row[0] for row in self._connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+
+    def purge_expired(self, now: float | None = None) -> dict[str, int]:
+        """Delete granular records beyond the configured maximum retention period."""
+        cutoff = (time() if now is None else now) - max(1, self.retention_hours) * 3600
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                deleted = {
+                    "counting_events": self._connection.execute(
+                        "DELETE FROM counting_events WHERE timestamp < ?", (cutoff,)
+                    ).rowcount,
+                    "presence_sessions": self._connection.execute(
+                        "DELETE FROM presence_sessions WHERE updated_at < ?", (cutoff,)
+                    ).rowcount,
+                    "timeout_events": self._connection.execute(
+                        "DELETE FROM timeout_events WHERE timeout_at < ?", (cutoff,)
+                    ).rowcount,
+                    "diagnostic_events": self._connection.execute(
+                        "DELETE FROM diagnostic_events WHERE timestamp < ?", (cutoff,)
+                    ).rowcount,
+                    "global_persons": self._connection.execute(
+                        "DELETE FROM global_persons WHERE last_seen_time < ?", (cutoff,)
+                    ).rowcount,
+                }
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        backup_cutoff = time() - max(1, self.retention_hours) * 3600
+        for backup in self.path.parent.glob(f"{self.path.name}.backup_*.fernet"):
+            try:
+                if backup.stat().st_mtime < backup_cutoff:
+                    backup.unlink()
+            except OSError:
+                pass
+        return {name: max(0, count) for name, count in deleted.items()}
+
+    def export_personal_data(self, limit: int = 1000) -> dict[str, object]:
+        """Return an admin-only, machine-readable export without any image data."""
+        limit = max(1, min(int(limit), 10_000))
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT timestamp, camera_id, global_person_id, direction, event_type,
+                       counted, uncertain, consensus_reason, confidence, model_name
+                FROM counting_events ORDER BY timestamp DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            events = [
+                {
+                    "timestamp": row[0],
+                    "camera_id": self._plain_text(row[1]),
+                    "pseudonymous_person_id": row[2],
+                    "direction": row[3],
+                    "event_type": row[4],
+                    "counted": bool(row[5]),
+                    "uncertain": bool(row[6]),
+                    "reason": self._plain_text(row[7]),
+                    "confidence": row[8],
+                    "model": self._plain_text(row[9]),
+                }
+                for row in rows
+            ]
+            return {
+                "exported_at": time(),
+                "retention_hours": self.retention_hours,
+                "images_included": False,
+                "aggregate_counts": self.restore_counts(),
+                "events": events,
+            }
+
+    def delete_personal_data(self, *, reset_aggregates: bool = False) -> dict[str, int]:
+        """Erase all granular camera/person records; aggregate counts are optional."""
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                deleted: dict[str, int] = {}
+                for table in (
+                    "counting_events",
+                    "presence_sessions",
+                    "timeout_events",
+                    "diagnostic_events",
+                    "global_persons",
+                    "camera_status",
+                ):
+                    deleted[table] = max(0, self._connection.execute(f"DELETE FROM {table}").rowcount)
+                if reset_aggregates:
+                    self._connection.execute(
+                        "UPDATE global_counts SET entered = 0, exited = 0, inside = 0 WHERE id = 1"
+                    )
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return deleted
+
+    def _protect_existing_rows(self) -> None:
+        marker = self._connection.execute(
+            "SELECT value FROM app_settings WHERE key = 'data_protection_version'"
+        ).fetchone()
+        if marker and marker[0] == "1":
+            return
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            person_ids = {
+                int(row[0])
+                for table in ("counting_events", "presence_sessions", "global_persons", "timeout_events", "diagnostic_events")
+                for row in self._connection.execute(
+                    f"SELECT DISTINCT global_person_id FROM {table} WHERE global_person_id IS NOT NULL"
+                ).fetchall()
+            }
+            mapping = {value: self._protected_id("person", value) for value in person_ids}
+            for old, new in mapping.items():
+                for table in ("counting_events", "presence_sessions", "timeout_events", "diagnostic_events"):
+                    self._connection.execute(
+                        f"UPDATE {table} SET global_person_id = ? WHERE global_person_id = ?", (new, old)
+                    )
+                self._connection.execute(
+                    "UPDATE global_persons SET global_person_id = ? WHERE global_person_id = ?", (new, old)
+                )
+            for row in self._connection.execute(
+                "SELECT id, camera_id, local_track_id, passage_id, consensus_reason, model_name FROM counting_events"
+            ).fetchall():
+                self._connection.execute(
+                    """
+                    UPDATE counting_events SET camera_id=?, local_track_id=?, passage_id=?, consensus_reason=?, model_name=?
+                    WHERE id=?
+                    """,
+                    (
+                        self._protected_text(row[1]),
+                        self._protected_id("track", row[2]),
+                        self._protected_pseudonym("passage", row[3]),
+                        self._protected_text(row[4]),
+                        self._protected_text(row[5]),
+                        row[0],
+                    ),
+                )
+            for row in self._connection.execute(
+                "SELECT session_id, entry_camera, exit_camera, exit_reason FROM presence_sessions"
+            ).fetchall():
+                self._connection.execute(
+                    "UPDATE presence_sessions SET entry_camera=?, exit_camera=?, exit_reason=? WHERE session_id=?",
+                    (self._protected_text(row[1]), self._protected_text(row[2]), self._protected_text(row[3]), row[0]),
+                )
+            for row in self._connection.execute("SELECT id, message, payload FROM diagnostic_events").fetchall():
+                self._connection.execute(
+                    "UPDATE diagnostic_events SET message=?, payload=? WHERE id=?",
+                    (self._protected_text(row[1]), self._protected_text(row[2]), row[0]),
+                )
+            self._connection.execute(
+                "INSERT OR REPLACE INTO app_settings(key, value, updated_at) VALUES('data_protection_version', '1', ?)",
+                (time(),),
+            )
+            self._connection.execute("COMMIT")
+        except Exception:
+            self._connection.execute("ROLLBACK")
+            raise
 
     def _upsert_person(self, global_person_id: int | None, timestamp: float) -> None:
         if global_person_id is None:
@@ -483,14 +691,16 @@ class EventDatabase:
             (global_person_id,),
         ).fetchone()
         if open_row:
-            self.record_diagnostic("info", "duplicate_entry", "Entry ignored because an inside session is already open", global_person_id, int(open_row[0]))
+            self._record_diagnostic_tx(
+                "info", "duplicate_entry", "Entry ignored because an inside session is already open", global_person_id, int(open_row[0])
+            )
             return False
         self._connection.execute(
             """
             INSERT INTO presence_sessions(global_person_id, entry_time, last_seen_time, status, entry_camera, entry_event_id, confidence, created_at, updated_at)
             VALUES (?, ?, ?, 'inside', ?, ?, ?, ?, ?)
             """,
-            (global_person_id, timestamp, timestamp, camera_id, event_id, confidence, time(), time()),
+            (global_person_id, timestamp, timestamp, self._protected_text(camera_id), event_id, confidence, time(), time()),
         )
         return True
 
@@ -500,7 +710,9 @@ class EventDatabase:
             (global_person_id,),
         ).fetchone()
         if not row:
-            self.record_diagnostic("warning", "exit_without_open_session", "Exit ignored because no open inside session exists", global_person_id, None)
+            self._record_diagnostic_tx(
+                "warning", "exit_without_open_session", "Exit ignored because no open inside session exists", global_person_id, None
+            )
             return False
         session_id = int(row[0])
         self._connection.execute(
@@ -509,6 +721,18 @@ class EventDatabase:
             SET exit_time = ?, status = 'outside', exit_reason = ?, exit_camera = ?, exit_event_id = ?, updated_at = ?
             WHERE session_id = ? AND status = 'inside'
             """,
-            (timestamp, reason, camera_id, event_id, time(), session_id),
+            (timestamp, self._protected_text(reason), self._protected_text(camera_id), event_id, time(), session_id),
         )
         return True
+
+    def _protected_text(self, value: str | None) -> str | None:
+        return self.protector.encrypt_text(value) if self.protector else value
+
+    def _protected_id(self, scope: str, value: int | None) -> int | None:
+        return self.protector.pseudonymize_id(scope, value) if self.protector else value
+
+    def _protected_pseudonym(self, scope: str, value: str | None) -> str | None:
+        return self.protector.pseudonymize_text(scope, value) if self.protector else value
+
+    def _plain_text(self, value: str | None) -> str | None:
+        return self.protector.decrypt_text(value) if self.protector else value

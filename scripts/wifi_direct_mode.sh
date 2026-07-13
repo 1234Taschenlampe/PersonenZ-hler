@@ -18,14 +18,15 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 PASSWORD="${PERSONENZAEHLER_DIRECT_PASSWORD:-}"
-if [[ ${#PASSWORD} -lt 8 ]]; then
-  echo "Set PERSONENZAEHLER_DIRECT_PASSWORD with at least 8 characters in $ENV_FILE."
+if [[ ${#PASSWORD} -lt 16 ]]; then
+  echo "Set PERSONENZAEHLER_DIRECT_PASSWORD with at least 16 random characters in $ENV_FILE."
   echo "Example file permissions: chmod 600 $ENV_FILE"
   exit 1
 fi
 
 backup="$HOME/personenzaehler_wifi_backup_$(date +%Y%m%d_%H%M%S).txt"
-nmcli -f all connection show > "$backup"
+umask 077
+nmcli -f NAME,UUID,TYPE,DEVICE connection show > "$backup"
 echo "Saved NetworkManager connection backup to $backup"
 
 if nmcli -t -f NAME connection show | grep -Fxq "$CONNECTION_NAME"; then
@@ -50,4 +51,4 @@ else
 fi
 
 nmcli connection up "$CONNECTION_NAME"
-echo "Direct WiFi active: SSID=$DIRECT_SSID Pi=http://${DIRECT_IP%/*}:8766"
+echo "Direct WiFi active: SSID=$DIRECT_SSID Pi=https://${DIRECT_IP%/*}:8766 (trusted TLS certificate required)"

@@ -1,7 +1,7 @@
 cameras:
   camera_1:
     camera_id: camera_1
-    device: /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920-video-index0
+    device: /dev/video0
     width: 1280
     height: 720
     fps: 30
@@ -21,7 +21,7 @@ cameras:
     exit_direction: B_to_A
   camera_2:
     camera_id: camera_2
-    device: /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_C31BDB1F-video-index0
+    device: /dev/video2
     width: 1280
     height: 720
     fps: 30
@@ -50,6 +50,7 @@ model:
     role: required_runtime
   reid_model_name: OSNet x1.0 HAILO10H
   reid_hef_path: models/osnet_x1_0_hailo10h.hef
+  reid_required: false
   postprocess_onnx_path: models/yolo26m_postprocessing.onnx
   postprocess_config_path: models/config_onnx_yolo26m.json
   output_format: yolo26_detection
@@ -89,6 +90,42 @@ timeout:
 database:
   path: data/person_counter.sqlite3
   store_video_frames: false
+  store_events: false
+  retention_hours: 24
+  encryption_required: true
+  encryption_key_env: VISITOR_COUNTER_DATA_KEY
+  encryption_key_file: ''
 display:
   display_raw_frames_only: false
   raw_frame_overlay: true
+  show_camera_preview: false
+  anonymization_mode: full_frame
+  pixel_size: 24
+privacy:
+  enabled: true
+  local_processing_only: true
+  telemetry_enabled: false
+  video_stream_enabled: false
+  remove_stream_frames_on_shutdown: true
+  privacy_notice_acknowledged: false
+  privacy_notice_acknowledged_at: ''
+  legal_basis: ''
+  purpose: anonymous occupancy counting
+  controller_name: ''
+  controller_contact: ''
+  consent_required: false
+  consent_recorded: false
+api:
+  enabled: true
+  bind_host: 127.0.0.1
+  port: 8766
+  require_auth: true
+  viewer_token_env: VISITOR_COUNTER_VIEWER_TOKEN
+  operator_token_env: VISITOR_COUNTER_OPERATOR_TOKEN
+  admin_token_env: VISITOR_COUNTER_ADMIN_TOKEN
+  minimum_token_length: 32
+  tls_certificate: ''
+  tls_private_key: ''
+  allowed_origins: []
+  max_requests_per_minute: 120
+  audit_retention_days: 30

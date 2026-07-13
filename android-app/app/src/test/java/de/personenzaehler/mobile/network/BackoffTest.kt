@@ -17,10 +17,11 @@ class BackoffTest {
     }
 
     @Test
-    fun hostValidatorAllowsOnlyLocalHttpTargets() {
-        assertTrue(HostValidator.isAllowed("http", "10.0.0.5"))
-        assertTrue(HostValidator.isAllowed("http", "raspberrypi.local"))
-        assertTrue(HostValidator.isAllowed("https", "example.com"))
-        assertFalse(HostValidator.isAllowed("http", "8.8.8.8"))
+    fun hostValidatorAllowsOnlyLocalHttpsTargets() {
+        assertTrue(HostValidator.isAllowed("https", "10.0.0.5"))
+        assertTrue(HostValidator.isAllowed("https", "raspberrypi.local"))
+        assertFalse(HostValidator.isAllowed("http", "10.0.0.5"))
+        assertFalse(HostValidator.isAllowed("https", "example.com"))
+        assertFalse(HostValidator.isAllowed("https", "8.8.8.8"))
     }
 }

@@ -1,64 +1,25 @@
 # Monitoring Reference
 
-Datum: 2026-07-02
-
 ## GUI
 
-Die GUI zeigt:
+Die GUI zeigt Backend-/Modellzustand, Hailo-Latenz, End-to-End-Latenz, Queue, verworfene Frames, CPU, RAM und Temperatur. Re-ID-Metriken bleiben bei der sicheren Standardkonfiguration inaktiv. Kamera-Vorschauen sind standardmaessig verdeckt.
 
-- Backend
-- HEF-Datei und HEF-SHA-256
-- Hailo-Gerät und Hailo-Inferenzaufrufe
-- reine Hailo-Latenz
-- End-to-End-Latenz und p95
-- Frame-Alter
-- Queue-Länge
-- verworfene Frames
-- OSNet-Status, OSNet-Latenz, OSNet-Aufrufe und Cache-Größe
-- CPU, RAM und Temperatur
+## Status-API
 
-Grün darf erst angezeigt werden, wenn der jeweilige Zustand tatsächlich nachgewiesen ist. Ohne YOLO26x-HEF bleibt der aktive Detektor nicht verfügbar.
-
-## Lokale Status-API
-
-Start:
+Sicherer lokaler Start (Tokens aus dem EnvironmentFile erforderlich):
 
 ```bash
-python scripts/status_api.py --project-root /home/raspibob/PersonenZ-hler --host 0.0.0.0 --port 8765
+python scripts/status_api.py --project-root /home/raspibob/PersonenZ-hler
 ```
 
-Endpunkte:
+Oeffentlich sind nur:
 
 - `GET /health`
-- `GET /status`
-- `GET /metrics`
 - `GET /api/v1/health`
-- `GET /api/v1/status`
-- `GET /api/v1/version`
-- `GET /api/v1/counts/current`
-- `GET /api/v1/telemetry/current`
-- `GET /api/v1/cameras`
-- `GET /api/v1/events`
+- `GET /api/v1/privacy/notice`
 
-Nachgewiesener Status am 2026-07-02:
+`viewer` darf Status, Zaehler, Kamera-/Runtime-Zustand und WebSocket lesen. `operator` darf zusaetzlich Telemetrie, Metriken, Ereignisse und den explizit aktivierten anonymisierten Stream lesen. `admin` darf exportieren und loeschen. Alle Antworten verhindern Caching; externe Bindung benoetigt TLS.
 
-- Hailo erkannt: ja
-- Architektur: HAILO10H
-- OSNet ready: ja
-- YOLO26x-HEF vorhanden: nein
-- Fallback aktiviert: nein
+Die API gibt keine Tokens, Embeddings, Geraetepfade oder rohe Hailo-Identifikationsausgaben aus. Datenbankmetrik enthaelt nur Vorhandensein und Groesse, keinen Pfad. Audit-Logs enthalten keine IP-Adressen oder Nutzdaten.
 
-Die API gibt keine Bilder, Embeddings, Passwörter, Tokens oder personenbezogenen Daten aus.
-
-## Systemmetriken
-
-Die API meldet aktuell:
-
-- CPU %
-- RAM %
-- Swap %
-- freien Speicher
-- Load Average
-- CPU-Temperatur
-- SQLite-Dateigröße und WAL-Größe
-- Hailo `scan` und `fw-control identify`
+Weitere Details: `docs/PRIVACY_AND_SECURITY.md`.

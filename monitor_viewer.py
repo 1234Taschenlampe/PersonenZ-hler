@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 import json
+import os
 import threading
 import time
 import urllib.request
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
 
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = os.environ.get("VISITOR_COUNTER_BASE_URL", "https://personenzaehler.local:8766").rstrip("/")
+ACCESS_TOKEN = os.environ.get("VISITOR_COUNTER_OPERATOR_TOKEN", "")
 WINDOW_NAME = "KI Besucherzaehler Monitor"
 FRAME_DELAY_SECONDS = 0.50
 
@@ -25,7 +28,7 @@ class MjpegStream(threading.Thread):
     def run(self) -> None:
         while self.running:
             try:
-                with urllib.request.urlopen(self.url, timeout=8) as stream:
+                with urllib.request.urlopen(authenticated_request(self.url), timeout=8) as stream:
                     data = b""
                     self.error = ""
                     while self.running:
@@ -61,7 +64,7 @@ class StatusPoller(threading.Thread):
     def run(self) -> None:
         while self.running:
             try:
-                with urllib.request.urlopen(f"{BASE_URL}/api/status", timeout=3) as response:
+                with urllib.request.urlopen(authenticated_request(f"{BASE_URL}/api/v1/status"), timeout=3) as response:
                     self.status = json.loads(response.read().decode("utf-8"))
                 self.error = ""
             except Exception as exc:
@@ -98,9 +101,16 @@ def put_text(img, text, pos, scale=1.0, color=(255, 255, 255), thickness=2):
 
 
 def main() -> int:
+    parsed = urlparse(BASE_URL)
+    if parsed.scheme != "https" and not (
+        parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1", "localhost"}
+    ):
+        raise RuntimeError("Monitor connections must use HTTPS, except on loopback.")
+    if len(ACCESS_TOKEN) < 32:
+        raise RuntimeError("VISITOR_COUNTER_OPERATOR_TOKEN must contain at least 32 characters.")
     streams = {
-        "Eingang": MjpegStream(f"{BASE_URL}/api/video_feed/entrance/detection"),
-        "Ausgang": MjpegStream(f"{BASE_URL}/api/video_feed/exit/detection"),
+        "Eingang": MjpegStream(f"{BASE_URL}/api/v1/video/camera_1.mjpg"),
+        "Ausgang": MjpegStream(f"{BASE_URL}/api/v1/video/camera_2.mjpg"),
     }
     status = StatusPoller()
     for stream in streams.values():
@@ -159,6 +169,10 @@ def main() -> int:
         stream.running = False
     cv2.destroyAllWindows()
     return 0
+
+
+def authenticated_request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(url, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
 
 
 if __name__ == "__main__":
