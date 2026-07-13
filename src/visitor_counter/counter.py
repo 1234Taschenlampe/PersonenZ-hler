@@ -58,13 +58,12 @@ class LineCrossingCounter:
         for track in tracks:
             # Check bounding box validity and area first
             if track.bbox.width <= 1 or track.bbox.height <= 1:
-                LOGGER.debug("COUNT_REJECTED camera=%s track_id=%s reason=invalid_bbox", camera_num, track.track_id)
+                LOGGER.debug("COUNT_REJECTED camera=%s reason=invalid_bbox", camera_num)
                 continue
             
             area = track.bbox.area
             if area < self.tracking_config.minimum_bbox_area:
-                LOGGER.debug("COUNT_REJECTED camera=%s track_id=%s reason=outside_counting_area area=%.1f", 
-                             camera_num, track.track_id, area)
+                LOGGER.debug("COUNT_REJECTED camera=%s reason=outside_counting_area", camera_num)
                 continue
 
             # Compute anchor (use center for stability as requested)
@@ -95,11 +94,9 @@ class LineCrossingCounter:
                     previous_center=anchor
                 )
                 self._tracks[track.track_id] = memory
-                LOGGER.info("TRACK camera=%s track_id=%s confirmed=%s center=%s previous_center=None", 
-                            camera_num, track.track_id, track.confirmed, anchor)
+                LOGGER.debug("TRACK camera=%s confirmed=%s state=new", camera_num, track.confirmed)
             else:
-                LOGGER.info("TRACK camera=%s track_id=%s confirmed=%s center=%s previous_center=%s", 
-                            camera_num, track.track_id, track.confirmed, anchor, memory.previous_center)
+                LOGGER.debug("TRACK camera=%s confirmed=%s state=active", camera_num, track.confirmed)
 
             memory.previous_center = anchor
             memory.last_seen_frame = frame_id
@@ -114,8 +111,10 @@ class LineCrossingCounter:
             if len(memory.raw_zone_history) >= limit and len(set(memory.raw_zone_history)) == 1:
                 new_stable = memory.raw_zone_history[0]
                 if new_stable != memory.stable_zone:
-                    LOGGER.info("ZONE_STATE: camera=%s track_id=%s previous_zone=%s current_zone=%s stable_frames=%s", 
-                                camera_num, track.track_id, memory.stable_zone, new_stable, limit)
+                    LOGGER.debug(
+                        "ZONE_STATE camera=%s previous_zone=%s current_zone=%s stable_frames=%s",
+                        camera_num, memory.stable_zone, new_stable, limit,
+                    )
                     memory.stable_zone = new_stable
                     if not memory.stable_zone_history or memory.stable_zone_history[-1] != new_stable:
                         memory.stable_zone_history.append(new_stable)
@@ -123,7 +122,7 @@ class LineCrossingCounter:
                         events.extend(self._process_transition(track, memory, frame_id))
             else:
                 # No stable zone change this frame
-                LOGGER.debug("COUNT_REJECTED camera=%s track_id=%s reason=no_zone_change", camera_num, track.track_id)
+                LOGGER.debug("COUNT_REJECTED camera=%s reason=no_zone_change", camera_num)
 
         # Cleanup expired tracks
         for track_id in list(self._tracks.keys()):
@@ -164,31 +163,29 @@ class LineCrossingCounter:
         # Validate count constraints and log rejections if any fail
         camera_num = 1 if self.camera_id == "camera_1" else 2
         if direction == Direction.UNKNOWN:
-            LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=wrong_direction", camera_num, track.track_id)
+            LOGGER.info("COUNT_REJECTED camera=%s reason=wrong_direction", camera_num)
             return []
             
         if not track.confirmed:
-            LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=track_not_confirmed", camera_num, track.track_id)
+            LOGGER.info("COUNT_REJECTED camera=%s reason=track_not_confirmed", camera_num)
             return []
             
         hits = frame_id - memory.first_seen_frame + 1
         if hits < self.tracking_config.min_confirmed_track_hits:
-            LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=insufficient_history hits=%s", 
-                        camera_num, track.track_id, hits)
+            LOGGER.info("COUNT_REJECTED camera=%s reason=insufficient_history", camera_num)
             return []
             
         if memory.counted:
-            LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=already_counted", camera_num, track.track_id)
+            LOGGER.info("COUNT_REJECTED camera=%s reason=already_counted", camera_num)
             return []
             
         now = time()
         if now - memory.last_count_time < self.tracking_config.count_cooldown_seconds:
-            LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=cooldown_active", camera_num, track.track_id)
+            LOGGER.info("COUNT_REJECTED camera=%s reason=cooldown_active", camera_num)
             return []
             
         if track.confidence < self.tracking_config.minimum_confidence:
-            LOGGER.info("COUNT_REJECTED camera=%s track_id=%s reason=confidence_too_low confidence=%.2f", 
-                        camera_num, track.track_id, track.confidence)
+            LOGGER.info("COUNT_REJECTED camera=%s reason=confidence_too_low", camera_num)
             return []
 
         # All checks passed! Count it

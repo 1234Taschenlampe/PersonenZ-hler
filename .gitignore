@@ -13,6 +13,16 @@ __pycache__/
 id_ed25519
 .codex_backups/
 artifacts/**/*.log
+artifacts/
+training/privacy-approval.json
+training/**/*.jpg
+training/**/*.jpeg
+training/**/*.png
+data/runtime_stream_frames/
+data/*.db*
+data/*.sqlite*
+config/api.env
+config/config.local.yaml
 logs/*
 !logs/.gitkeep
 output/

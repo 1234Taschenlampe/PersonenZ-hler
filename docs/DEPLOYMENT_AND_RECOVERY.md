@@ -4,6 +4,8 @@ Datum: 2026-07-02
 
 ## Backups
 
+Die folgenden historischen Backups koennen Alt-Daten oder alte unsichere Konfigurationen enthalten. Vor Produktivbetrieb inventarisieren, verschluesseln, mit einer dokumentierten Frist versehen und nach Ablauf sicher loeschen; nicht ungeprueft wiederherstellen.
+
 Vor den Änderungen wurde ein inkrementelles Backup erstellt:
 
 `/home/raspibob/personenzaehler_backups/incremental_20260702T132829Z`
@@ -36,6 +38,8 @@ Admin-Schritte auf BOB:
 ```bash
 sudo install -m 0644 /home/raspibob/PersonenZ-hler/systemd/visitor-counter.service /etc/systemd/system/visitor-counter.service
 sudo install -m 0644 /home/raspibob/PersonenZ-hler/systemd/visitor-counter-status-api.service /etc/systemd/system/visitor-counter-status-api.service
+sudo install -d -m 0700 /etc/personenzaehler
+sudo /home/raspibob/PersonenZ-hler/.venv/bin/python /home/raspibob/PersonenZ-hler/scripts/generate_secrets.py --output /etc/personenzaehler/api.env
 sudo systemctl daemon-reload
 sudo systemctl enable visitor-counter-status-api.service
 sudo systemctl restart visitor-counter-status-api.service

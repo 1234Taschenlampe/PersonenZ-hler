@@ -16,11 +16,11 @@ import psutil
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from visitor_counter.camera_manager import CameraCapture, LatestFrameHub
-from visitor_counter.configuration import CameraConfig, ModelConfig, load_config
-from visitor_counter.hailo_manager import HailoManager
-from visitor_counter.tracker import create_tracker
-from visitor_counter.types import Detection, LatencyWindow, summarize_latency
+from visitor_counter.camera_manager import CameraCapture, LatestFrameHub  # noqa: E402
+from visitor_counter.configuration import CameraConfig, ModelConfig, load_config  # noqa: E402
+from visitor_counter.hailo_manager import HailoManager  # noqa: E402
+from visitor_counter.tracker import create_tracker  # noqa: E402
+from visitor_counter.types import LatencyWindow  # noqa: E402
 
 
 def main() -> int:

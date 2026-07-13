@@ -15,6 +15,13 @@ Restart=on-failure
 RestartSec=5
 KillSignal=SIGINT
 TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=full
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=graphical-session.target

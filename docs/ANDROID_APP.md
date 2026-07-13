@@ -16,7 +16,7 @@ GET /api/v1/cameras
 GET /api/v1/events
 ```
 
-Die API muss direkt im lokalen WLAN auf `0.0.0.0:8766` lauschen. Der User-Service startet sie dauerhaft auf diesem Port:
+Die API bleibt standardmaessig auf `127.0.0.1:8766`. Fuer mobilen Zugriff sind ein lokaler HTTPS-Hostname, ein vom Android-Geraet vertrautes Zertifikat, drei Rollentokens und eine private Bind-Adresse erforderlich. Ohne TLS verweigert der Server eine Nicht-Loopback-Bindung. Siehe `PRIVACY_AND_SECURITY.md`.
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -28,10 +28,10 @@ systemctl --user enable --now visitor-counter-mobile-api.service
 Danach ist die API im lokalen WLAN erreichbar:
 
 ```text
-http://<pi-ip-oder-hostname>:8766/api/v1/status
+https://<pi-hostname>:8766/api/v1/status
 ```
 
-Die Android-App nutzt keine feste IP-Adresse. In den Einstellungen koennen `http`, `personenzaehler.local` oder die aktuelle Pi-IP und Port `8766` gespeichert werden. Die App zeigt REST-Status, WebSocket-Status, Endpunkt, HTTP-Code, Antwortzeit, letzte erfolgreiche Aktualisierung und konkrete Fehler getrennt an. Wenn WebSocket nicht verfuegbar ist, bleibt REST-Polling aktiv.
+Die Android-App nutzt keine feste IP-Adresse, akzeptiert aber ausschliesslich HTTPS zu lokalen/privaten Zielen und verlangt ein Zugriffstoken. Klartextverkehr und Screenshots sind gesperrt. Wenn WebSocket nicht verfuegbar ist, bleibt authentifiziertes REST-Polling aktiv.
 
 Fuer WLAN-Roaming beobachtet die App das Android-Default-Netzwerk. Nach einem Access-Point- oder IP-Wechsel startet sie die REST-Verbindung automatisch neu. Einzelne verlorene Requests werden als kurze Unterbrechung angezeigt; erst mehrere Fehlschlaege oder laengere Funkstille setzen REST wirklich auf getrennt. In Dashboard und Einstellungen werden Handy-Netz, IP und Access Point angezeigt.
 

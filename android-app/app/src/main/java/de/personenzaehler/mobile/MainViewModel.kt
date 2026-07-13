@@ -86,6 +86,12 @@ class MainViewModel(
     }
 
     fun saveToken(token: String) {
+        if (token.trim().length < 32) {
+            _state.update {
+                it.copy(connection = it.connection.copy(lastError = "Token muss mindestens 32 Zeichen lang sein"))
+            }
+            return
+        }
         tokenStore.saveToken(token)
     }
 
@@ -127,7 +133,7 @@ class MainViewModel(
 
     fun useDiscoveredServer(server: DiscoveredServerInfo) {
         val port = server.port.takeIf { it in 1..65_535 } ?: 8766
-        saveSettings(_state.value.settings.copy(scheme = "http", host = server.host, port = port))
+        saveSettings(_state.value.settings.copy(scheme = "https", host = server.host, port = port))
     }
 
     fun setFilter(filter: EventFilter) {

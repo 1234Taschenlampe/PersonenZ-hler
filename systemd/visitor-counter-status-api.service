@@ -1,19 +1,28 @@
 [Unit]
 Description=Visitor Counter Local Status API
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 Type=simple
 User=raspibob
 WorkingDirectory=/home/raspibob/PersonenZ-hler
 Environment=PYTHONPATH=/home/raspibob/PersonenZ-hler/src
-ExecStart=/home/raspibob/PersonenZ-hler/.venv/bin/python scripts/status_api.py --project-root /home/raspibob/PersonenZ-hler --host 0.0.0.0 --port 8766
+EnvironmentFile=/etc/personenzaehler/api.env
+ExecStart=/home/raspibob/PersonenZ-hler/.venv/bin/python scripts/status_api.py --project-root /home/raspibob/PersonenZ-hler
 Restart=on-failure
 RestartSec=10
 StartLimitBurst=5
 StartLimitIntervalSec=300
 TimeoutStopSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

@@ -67,7 +67,8 @@ class PiApiClient(
         onState: (LiveSocketState, String?) -> Unit,
     ): WebSocket? {
         if (!settings.webSocketEnabled || !settings.configured || !HostValidator.isAllowed(settings.scheme, settings.host)) return null
-        val wsScheme = if (settings.scheme == "https") "wss" else "ws"
+        if (tokenStore.readToken().isNullOrBlank()) return null
+        val wsScheme = "wss"
         val request = requestBuilder("$wsScheme://${settings.host.trim()}:${settings.port}/api/v1/ws/live").build()
         return client.newWebSocket(
             request,
@@ -102,8 +103,9 @@ class PiApiClient(
     private fun ensureAllowed(settings: ServerSettings) {
         if (!settings.configured) error("Kein Server konfiguriert")
         if (!HostValidator.isAllowed(settings.scheme, settings.host)) {
-            error("HTTP ist nur fuer lokale/private Server erlaubt")
+            error("Nur HTTPS zu einem lokalen/privaten Server ist erlaubt")
         }
+        if (tokenStore.readToken().isNullOrBlank()) error("Zugriffstoken fehlt")
     }
 
     private data class RawResponse(
@@ -135,7 +137,8 @@ class PiApiClient(
 
     private fun requestBuilder(url: String): Request.Builder {
         val builder = Request.Builder().url(url)
-        tokenStore.readToken()?.let { token -> builder.header("Authorization", "Bearer $token") }
+        val token = tokenStore.readToken() ?: error("Zugriffstoken fehlt")
+        builder.header("Authorization", "Bearer $token")
         return builder
     }
 }

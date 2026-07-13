@@ -1,7 +1,7 @@
 package de.personenzaehler.mobile.data
 
 data class ServerSettings(
-    val scheme: String = "http",
+    val scheme: String = "https",
     val host: String = "",
     val port: Int = 8766,
     val refreshSeconds: Int = 5,
