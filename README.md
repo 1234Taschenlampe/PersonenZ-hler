@@ -11,6 +11,7 @@ WLAN-Kamera 2 ─┘                         │
                                         ├─ YOLO26m Person Detection
                                         ├─ lokales Tracking
                                         ├─ OSNet ReID
+                                        ├─ temporäre globale Person-ID
                                         ├─ A/neutral/B-Zonenlogik
                                         ├─ Dual-Camera-Consensus
                                         ├─ SQLite / lokale API
@@ -21,15 +22,18 @@ Die Kameras können RTSP/RTSPS/HTTP/HTTPS liefern; USB/V4L2 bleibt für Entwickl
 
 ## Zähllogik
 
-YOLO26m erkennt nur Personen. Lokales Tracking hält Bewegungsverläufe innerhalb einer Kamera stabil. OSNet erzeugt kurzlebige Merkmalsvektoren zur kameraübergreifenden Wiedererkennung. Eine Zählung entsteht erst durch die deterministische Passage-Logik aus Zonenfolge, Richtung, Zeitfenster und Consensus. ReID allein darf keine Person zählen.
+YOLO26m erkennt nur Personen. Lokales Tracking hält Bewegungsverläufe innerhalb einer Kamera stabil. OSNet erzeugt temporäre Merkmalsvektoren zur kameraübergreifenden Wiedererkennung. Eine interne `global_person_id` verbindet lokale Tracks derselben unbekannten Person; sie wird nicht mit Namen oder realen Identitäten verknüpft. Eine Zählung entsteht erst durch die deterministische Passage-Logik aus Zonenfolge, Richtung, Zeitfenster und Consensus. ReID allein darf keine Person zählen.
 
-`inside`, `entered` und `exited` werden in der neuen Produktionspipeline nur durch bestätigte Crossing-/Consensus-Ereignisse verändert. Sichtbarkeit ist davon getrennte Telemetrie.
+`inside`, `entered` und `exited` werden in der Produktionspipeline nur durch bestätigte Crossing-/Consensus-Ereignisse verändert. Sichtbarkeit ist davon getrennte Telemetrie.
 
 ## Datenschutzstandard
 
 - Verarbeitung lokal auf Pi/Hailo
-- keine Cloud-Telemetrie
+- keine Cloud-Telemetrie für Kameradaten
+- temporäre pseudonyme Person-ID bleibt für Matching erhalten
+- OSNet ReID bleibt für Cross-Camera-Matching aktiv
 - keine Gesichtserkennung und keine Namenszuordnung
+- keine Alters-, Geschlechts-, Emotions- oder Herkunftsklassifizierung
 - keine dauerhafte Speicherung von Video oder Einzelbildern
 - ReID-Embeddings nur temporär im RAM
 - granulare Ereignisspeicherung standardmäßig aus
@@ -37,6 +41,12 @@ YOLO26m erkennt nur Personen. Lokales Tracking hält Bewegungsverläufe innerhal
 - Kamerabetrieb wird blockiert, solange Betreiber-, Zweck- und Datenschutzhinweis-Felder nicht ausgefüllt sind
 
 Lokale Verarbeitung bedeutet nicht automatisch DSGVO-Konformität. Der konkrete Standort und Einsatzzweck müssen separat geprüft werden. Siehe [Datenschutzprüfung Deutschland 2026](docs/PRIVACY_GERMANY_2026.md) und [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
+
+## Lizenz- und Startschutz
+
+Der normale GUI- und Service-Start ist für die Produktivkonfiguration fail-closed geschützt. Die Anwendung prüft eine lokal signierte Lizenz und standardmäßig eine dazu passende signierte Freischaltung auf GitHub. Die Prüfung nutzt HTTPS und Ed25519-Signaturen; der private Signierschlüssel gehört nicht auf den Raspberry Pi oder ins Repository. Der Emulator bleibt davon getrennt, damit Entwicklung und CI möglich sind.
+
+Details: [Lizenz- und Entitlement-System](docs/LICENSE_SYSTEM.md).
 
 ## Digital Twin
 
@@ -83,6 +93,7 @@ pytest -m hardware
 - [Digital Twin](docs/EMULATOR.md)
 - [Datenschutz Deutschland 2026](docs/PRIVACY_GERMANY_2026.md)
 - [Datenschutz und Sicherheit](docs/PRIVACY_AND_SECURITY.md)
+- [Lizenzsystem](docs/LICENSE_SYSTEM.md)
 - [Lokaler Gemma-Assistent](docs/LOCAL_AGENT.md)
 - [Jugend-forscht-Projektdokumentation](docs/JUGEND_FORSCHT_PROJECT.md)
 
