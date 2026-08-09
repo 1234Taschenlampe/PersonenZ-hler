@@ -118,7 +118,7 @@ privacy:
   privacy_notice_acknowledged: false
   privacy_notice_acknowledged_at: ''
   legal_basis: ''
-  purpose: anonymous occupancy counting
+  purpose: occupancy counting with temporary pseudonymous person IDs and OSNet ReID for duplicate suppression
   controller_name: ''
   controller_contact: ''
   consent_required: false
