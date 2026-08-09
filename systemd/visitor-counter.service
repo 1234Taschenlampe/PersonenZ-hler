@@ -17,7 +17,7 @@ TimeoutStopSec=20
 Environment=PYTHONPATH=/home/raspibob/PersonenZ-hler/src
 # OpenCV/FFmpeg RTSP transport. Keeps WLAN camera traffic on TCP to reduce
 # frame corruption on lossy Wi-Fi. Credentials remain in config.yaml, not here.
-Environment=OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp
+Environment="OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp"
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
