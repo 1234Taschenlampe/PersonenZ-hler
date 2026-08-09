@@ -10,8 +10,8 @@ from time import sleep, time
 from .camera_manager import CameraCapture, LatestFrameHub, camera_source_kind
 from .configuration import load_config, privacy_readiness_errors
 from .counter import GlobalCounts
-from .inference_pipeline import ProcessingPipeline
 from .logging_setup import configure_logging
+from .production_pipeline import ProductionProcessingPipeline
 from .types import RuntimeStats
 
 LOGGER = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class VisitorCounterService:
             for camera in self.config.cameras.values()
         ]
         self.live_status_path = project_root / "data" / "live_status.json"
-        self.pipeline = ProcessingPipeline(
+        self.pipeline = ProductionProcessingPipeline(
             self.config,
             project_root,
             self.frame_hub,
