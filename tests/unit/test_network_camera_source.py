@@ -4,7 +4,7 @@ from visitor_counter.camera_manager import camera_source_kind, is_network_camera
 
 
 def test_rtsp_source_is_network_camera() -> None:
-    source = "rtsp://user:secret@192.168.50.21:554/stream"
+    source = "rtsp://192.168.50.21:554/stream"
     assert is_network_camera_source(source)
     assert camera_source_kind(source) == "RTSP"
 
