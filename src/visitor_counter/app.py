@@ -4,6 +4,7 @@ import argparse
 import hashlib
 from pathlib import Path
 
+from .license_guard import LicenseError, enforce_license
 from .synthetic_test import run_synthetic_counter_test
 
 
@@ -16,8 +17,8 @@ def get_db_sha256(db_path: Path) -> str:
             for chunk in iter(lambda: f.read(65536), b""):
                 h.update(chunk)
         return h.hexdigest()
-    except Exception as e:
-        return f"error_{e}"
+    except Exception as exc:
+        return f"error_{exc}"
 
 
 def main() -> int:
@@ -25,15 +26,13 @@ def main() -> int:
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--test-global-counter", action="store_true", help="Run the synthetic global counter validation test")
     args = parser.parse_args()
-    
+
     project_root = args.project_root.resolve()
     if args.test_global_counter:
         db_path = project_root / "data" / "events.db"
         sha_before = get_db_sha256(db_path)
         print(f"Production database SHA-256 before test: {sha_before}")
-        
         result = run_synthetic_counter_test(project_root)
-        
         sha_after = get_db_sha256(db_path)
         print(f"Production database SHA-256 after test:  {sha_after}")
         if sha_before == sha_after:
@@ -41,7 +40,13 @@ def main() -> int:
         else:
             print("WARNING: Production database was modified during the test!")
         return result
-        
+
+    try:
+        enforce_license(project_root)
+    except LicenseError as exc:
+        print(f"Start blockiert: {exc}")
+        return 4
+
     from .gui import run_gui
 
     return run_gui(project_root)

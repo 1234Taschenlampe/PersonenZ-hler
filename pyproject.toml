@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "visitor-counter"
 version = "0.1.0"
-description = "Dual-camera YOLO26x Hailo visitor counter for Raspberry Pi"
+description = "Dual-camera YOLO26m Hailo visitor counter for Raspberry Pi"
 requires-python = ">=3.11"
 dependencies = [
   "cryptography>=44.0",
@@ -24,7 +24,7 @@ visitor-counter = "visitor_counter.app:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = "-q -m 'not hardware'"
 markers = [

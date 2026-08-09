@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GUI runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install project and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest PyYAML opencv-python-headless
+      - name: Compile Python sources
+        run: python -m compileall -q src scripts tests
+      - name: Unit tests
+        run: pytest -m "not hardware" -q
+      - name: Digital twin acceptance suite
+        run: PYTHONPATH=src python -m visitor_counter.emulator
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install security tools
+        run: python -m pip install bandit pip-audit
+      - name: Bandit audit
+        continue-on-error: true
+        run: bandit -r src scripts -x tests
+      - name: Dependency audit
+        run: pip-audit -r requirements.txt
+      - name: Repository secret-pattern guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nEI '(rtsp|https?)://[^[:space:]/]+:[^[:space:]@]+@|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk-[A-Za-z0-9_-]{20,}' -- ':!docs/**' ':!*.example.*'; then
+            echo 'Potential credential material found in tracked production files.' >&2
+            exit 1
+          fi
