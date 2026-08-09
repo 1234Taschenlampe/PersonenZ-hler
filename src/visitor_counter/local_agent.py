@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Iterable
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 _ALLOWED_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".json", ".toml", ".sh", ".ps1", ".kt", ".kts", ".xml", ".service"}
@@ -92,9 +93,18 @@ class LocalGemmaAgent:
 
     def __init__(self, root: Path, endpoint: str = "http://127.0.0.1:8080/v1/chat/completions", model: str = "gemma-4-e2b-it") -> None:
         self.root = root.resolve()
-        self.endpoint = endpoint
+        self.endpoint = self._validated_loopback_endpoint(endpoint)
         self.model = model
         self.kb = ProjectKnowledgeBase(self.root)
+
+    @staticmethod
+    def _validated_loopback_endpoint(endpoint: str) -> str:
+        parsed = urlparse(endpoint)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("Der lokale Assistent darf nur einen HTTP-Loopback-Endpunkt verwenden")
+        if parsed.username or parsed.password:
+            raise ValueError("Zugangsdaten in der lokalen Agent-URL sind nicht erlaubt")
+        return endpoint
 
     def ask(self, message: str, history: Iterable[dict[str, str]] = ()) -> str:
         chunks = self.kb.search(message)
@@ -112,7 +122,7 @@ class LocalGemmaAgent:
         payload = json.dumps({"model": self.model, "messages": messages, "temperature": 0.2, "max_tokens": 1200}).encode()
         request = Request(self.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         try:
-            with urlopen(request, timeout=90) as response:
+            with urlopen(request, timeout=90) as response:  # nosec B310 - endpoint is validated as loopback HTTP above
                 data = json.loads(response.read().decode("utf-8"))
         except (OSError, URLError, ValueError) as exc:
             raise RuntimeError(f"Lokaler Gemma-Dienst nicht erreichbar: {exc}") from exc
