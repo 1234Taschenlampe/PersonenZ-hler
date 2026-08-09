@@ -1,106 +1,142 @@
 # Datenschutzprüfung Deutschland – PersonenZähler
 
-Stand: August 2026. Dieses Dokument ist eine technische Datenschutzprüfung und keine individuelle Rechtsberatung. Ob ein konkreter Einsatz zulässig ist, hängt insbesondere von Ort, Verantwortlichem, Zweck, betroffenen Personengruppen, Kamerawinkel und organisatorischem Umfeld ab.
+Stand: August 2026. Dieses Dokument ist eine technische Datenschutzprüfung und keine individuelle Rechtsberatung. Die Zulässigkeit eines realen Einsatzes hängt insbesondere von Einsatzort, Verantwortlichem, Zweck, Kamerawinkel, betroffenen Personengruppen und organisatorischem Umfeld ab.
 
-## Kurzfazit
+## Aktuelle Projektentscheidung
 
-Das System kann datenschutzfreundlich ausgelegt werden, ist aber **nicht allein durch lokale Verarbeitung automatisch DSGVO-konform**. Schon die kurzfristige Aufnahme und KI-Auswertung identifizierbarer Personen ist eine Verarbeitung personenbezogener Daten. Die sichere Produktstrategie lautet daher: möglichst kleiner Aufnahmebereich, keine dauerhafte Bildspeicherung, keine Gesichtserkennung, keine Namenszuordnung, lokale Verarbeitung, kurze Speicherfristen, klare Rechtsgrundlage, transparente Hinweise und technische Sperren gegen unzulässige Konfigurationen.
+Für den derzeitigen Forschungs- und Entwicklungsstand gelten folgende feste Grenzen:
 
-OSNet-ReID ist rechtlich sensibler als reine anonyme Zählung. Es erzeugt Merkmalsvektoren, mit denen dieselbe Person kameraübergreifend wiedererkannt werden soll. Ob dies im konkreten Einsatz bereits als Verarbeitung biometrischer Daten im Sinne von Art. 4 Nr. 14 und Art. 9 DSGVO einzuordnen ist, hängt insbesondere davon ab, ob die Verarbeitung der eindeutigen Identifizierung dient. Wegen des Zwecks der Wiedererkennung behandeln wir ReID technisch **konservativ als besonders schutzbedürftige personenbezogene Merkmalsverarbeitung**. Embeddings dürfen deshalb nicht persistiert werden und benötigen eine gesonderte Freigabe im Deployment.
+- **Temporäre interne Person-IDs bleiben erhalten.** Sie dienen nur dazu, Tracks und Durchgänge technisch zusammenzuführen. Sie werden nicht mit Namen, Konten, Mitarbeiter-IDs oder anderen realen Identitäten verknüpft.
+- **OSNet ReID bleibt vorerst aktiv.** Es wird ausschließlich zur kameraübergreifenden Wiedererkennung und zur Vermeidung von Doppelzählungen eingesetzt.
+- **Gesichtserkennung wird nicht eingebaut.**
+- **Alters-, Geschlechts-, Emotions-, Ethnie- oder ähnliche Personenklassifizierung wird nicht eingebaut.**
+- **Keine dauerhafte Video- oder Einzelbildspeicherung.**
+- **Keine dauerhafte Speicherung von OSNet-Embeddings.**
 
-## Primärquellen
+Damit bleibt die für die Zählung gewünschte technische Person-ID erhalten, während Funktionen entfallen, die für den Zählzweck nicht erforderlich sind.
 
-- DSGVO: insbesondere Art. 5, 6, 13, 25, 30, 32 und 35; bei biometrischer Identifizierung zusätzlich Art. 9. Quelle: EUR-Lex, Verordnung (EU) 2016/679.
-- Europäischer Datenschutzausschuss, Leitlinien 3/2019 zur Verarbeitung personenbezogener Daten durch Videogeräte, finale Fassung vom 30.01.2020.
-- Datenschutzkonferenz (DSK), Orientierungshilfen zu Videoüberwachung sowie aktuelle Orientierungshilfen zu KI und technischen/organisatorischen Maßnahmen.
+## Rechtliche Einordnung
 
-## Technische Mindestanforderungen vor Livebetrieb
+Lokale Verarbeitung macht ein Kamerasystem nicht automatisch DSGVO-konform. Bereits das Erfassen und automatisierte Auswerten identifizierbarer Personen kann eine Verarbeitung personenbezogener Daten darstellen. Maßgeblich bleiben insbesondere Rechtmäßigkeit, Zweckbindung, Datenminimierung, Speicherbegrenzung, Transparenz, Sicherheit und Datenschutz durch Technikgestaltung.
 
-### Aufnahme und Bilddaten
+OSNet-ReID ist rechtlich sensibler als reine Detection und Zonenlogik. Das System erzeugt Merkmalsvektoren, um dieselbe unbekannte Person erneut zuzuordnen. Ob dies im konkreten Einsatz als biometrische Verarbeitung im Sinne von Art. 4 Nr. 14 und Art. 9 DSGVO einzuordnen ist, muss für den tatsächlichen Einsatz geprüft werden. Deshalb behandeln wir ReID technisch konservativ als besonders schutzbedürftige personenbezogene Merkmalsverarbeitung.
 
-- Keine permanente Video- oder Einzelbildspeicherung.
-- Rohframes existieren nur so lange, wie sie für Decoding und Inferenz erforderlich sind.
-- Vorschau standardmäßig aus.
-- Falls eine lokale Vorschau bewusst aktiviert wird: Vollbild-Anonymisierung als sicherer Standard.
-- Öffentliche Wege, Nachbargrundstücke, Arbeitsplätze oder andere nicht erforderliche Bereiche durch Kameraposition und Masken aus dem Erfassungsbereich entfernen.
+## Person-ID
+
+`global_person_id` ist eine **interne pseudonyme Laufzeitkennung**, keine reale Identität. Sie darf nicht verwendet werden, um festzustellen, wer eine Person ist.
+
+Aktuelle technische Zielregel:
+
+- ID nur innerhalb des Zählsystems verwenden,
+- keine Namens- oder Kontozuordnung,
+- keine Gesichtsdaten verknüpfen,
+- keine öffentliche Anzeige der ID,
+- keine ID in normalen Logs,
+- keine dauerhafte Personenhistorie im Standardbetrieb,
+- aktuelle Cache-Grenze: maximal 1800 Sekunden,
+- ID/Embedding nach Ablauf aus dem Arbeitsspeicher entfernen.
+
+Die 1800 Sekunden bleiben auf Wunsch zunächst bestehen und werden später anhand der realen Messreihe auf Erforderlichkeit geprüft.
+
+## OSNet ReID
+
+OSNet bleibt als technische Kernfunktion erhalten. Schutzmaßnahmen:
+
+- Embeddings ausschließlich im RAM,
+- keine Speicherung in SQLite, Logs, Exporten oder Bilddateien,
+- kein Training auf den im Produktivbetrieb beobachteten Personen,
+- keine Verwendung zur Namensidentifikation,
+- kein Aufbau einer dauerhaften Referenzdatenbank,
+- Verwendung nur für Cross-Camera-Matching und Doppelzählungsvermeidung,
+- automatische Löschung mit dem Identity-Cache.
+
+Falls eine spätere rechtliche Prüfung OSNet für einen bestimmten Einsatzort ausschließt, bleibt als technische Alternative ein Matching über Zeit, Reihenfolge, Bewegungsrichtung, Position und Passage-Geometrie verfügbar. OSNet wird deshalb nicht aus dem Forschungsprojekt entfernt.
+
+## Bewusst ausgeschlossene Funktionen
+
+Folgende Funktionen gehören nicht zum Produktziel und sollen auch künftig nicht stillschweigend ergänzt werden:
+
+- Gesichtserkennung / Face Recognition,
+- Zuordnung zu Namen oder Benutzerkonten,
+- Altersschätzung,
+- Geschlechtsklassifizierung,
+- Emotionserkennung,
+- Ethnie-/Herkunftsklassifizierung,
+- Gesundheits- oder Verhaltensprofiling,
+- dauerhafte Bewegungsprofile einzelner Personen.
+
+Diese Funktionen würden für den eigentlichen Zählzweck keinen notwendigen Mehrwert liefern.
+
+## Aufnahme und Bilddaten
+
+- Rohframes nur für Decoding, Detection, Tracking und ReID verwenden.
+- Keine permanente Video- oder Snapshot-Speicherung.
 - Kein Audio erfassen.
-- Keine Gesichtserkennung und keine Zuordnung zu Namen, Mitarbeiter-IDs oder anderen Identitäten.
+- Vorschau standardmäßig aus.
+- Bei bewusster lokaler Vorschau möglichst anonymisieren.
+- Öffentliche Wege, Nachbargrundstücke, Arbeitsplätze oder andere unnötige Bereiche durch Kameraposition und Masken minimieren.
 
-### ReID
+## Datenbank und Logs
 
-- OSNet-Embeddings nur im RAM.
-- Keine Speicherung in SQLite, Logs, Crash-Dumps oder Exporten.
-- Automatisches Verwerfen spätestens nach dem technisch erforderlichen Zeitfenster.
-- ReID darf ausschließlich zur Vermeidung von Doppelzählungen bzw. zur Passagezuordnung dienen.
-- Kein Personenprofil, keine Historie „Person X war wann wo“, kein Langzeittracking.
-- Wenn der gleiche Zählzweck am konkreten Standort zuverlässig ohne ReID erreichbar ist, ist die weniger eingriffsintensive Variante vorzuziehen.
+Standardbetrieb:
 
-### Datenbank und Logs
-
-Standardmäßig werden nur aggregierte Zähler gespeichert. Granulare Ereignisse bleiben aus. Werden Ereignisse für wissenschaftliche Validierung benötigt, gilt:
-
-- separater Forschungsmodus,
-- dokumentierter Zweck,
-- minimale Felder,
-- kurze Aufbewahrung,
-- Verschlüsselung,
+- aggregierte Ein-/Ausgangszähler,
+- System- und Kamerahealth,
 - keine Rohbilder,
 - keine persistenten OSNet-Embeddings,
-- keine direkt wiedererkennbaren IDs.
+- keine Person-IDs in normalen Logs,
+- granulare Personenereignisse standardmäßig deaktiviert.
 
-Logs dürfen keine RTSP-Zugangsdaten, Tokens, Bildkoordinaten, Bounding Boxes oder ReID-Vektoren enthalten.
-
-## Rechtsgrundlage und Verhältnismäßigkeit
-
-Der Betreiber muss vor Aktivierung festlegen, auf welche Rechtsgrundlage er sich stützt. Bei privaten Verantwortlichen kommt häufig ein berechtigtes Interesse nach Art. 6 Abs. 1 lit. f DSGVO in Betracht; das ist jedoch keine automatische Freigabe. Erforderlich sind ein konkretes Interesse, Erforderlichkeit und eine Interessenabwägung. Eine Einwilligung ist für frei zugängliche Videoerfassung häufig ungeeignet, weil sie tatsächlich freiwillig und widerrufbar sein müsste.
-
-Die Software kann diese juristische Prüfung nicht selbst durchführen. Sie kann nur verhindern, dass Kameras ohne dokumentierte Betreiberangaben gestartet werden.
+Werden für Forschung vorübergehend Ereignisse gespeichert, benötigen sie einen getrennten Forschungszweck, kurze Aufbewahrung, Verschlüsselung und eine eigene Freigabe.
 
 ## Transparenz
 
-Vor Betreten des Erfassungsbereichs muss die betroffene Person erkennen können, dass eine kamerabasierte Verarbeitung stattfindet. Der Hinweis sollte mindestens Verantwortlichen, Zweck und eine leicht erreichbare Stelle für weitere Datenschutzinformationen nennen. Die ausführlichen Informationen nach Art. 13 DSGVO müssen verfügbar sein.
+Der tatsächliche Betreiber muss den Kamerabereich und die Verarbeitung transparent kennzeichnen. Die Anwendung erzwingt deshalb vor Produktivstart weiterhin dokumentierte Felder für Zweck, Rechtsgrundlage, Verantwortlichen, Kontakt und bestätigten Datenschutzhinweis.
 
-Für Jugend forscht sollte zusätzlich verständlich erklärt werden:
+Die Information sollte wahrheitsgemäß erklären:
 
-- Es wird gezählt, nicht identifiziert.
-- Bilder werden nicht dauerhaft gespeichert.
-- Die KI läuft lokal.
-- ReID dient nur der technischen Doppelzählungsvermeidung.
-- ReID-Merkmale werden nach kurzer Zeit verworfen.
+- kamerabasierte Personenzählung,
+- lokale KI-Verarbeitung,
+- temporäre interne Person-ID,
+- OSNet-Wiedererkennung zur Doppelzählungsvermeidung,
+- keine Gesichtserkennung,
+- keine Namensidentifikation,
+- keine dauerhafte Bildspeicherung.
 
 ## Datenschutz-Folgenabschätzung
 
-Eine DSFA nach Art. 35 DSGVO kann erforderlich sein, insbesondere bei systematischer umfangreicher Überwachung öffentlich zugänglicher Bereiche oder bei besonders risikoreicher biometrischer Verarbeitung. Der Code darf deshalb niemals anzeigen „DSGVO-konform“ oder „DSFA nicht erforderlich“. Stattdessen zeigt die Inbetriebnahme einen Status wie `Datenschutzprüfung durch Betreiber erforderlich`.
-
-## Beschäftigte, Schule, öffentliche Bereiche
-
-In Arbeitsumgebungen können zusätzlich Beschäftigtendatenschutz und Beteiligungsrechte relevant sein. In Schulen, öffentlichen Einrichtungen oder öffentlich zugänglichen Bereichen können zusätzliche nationale bzw. landesrechtliche Vorgaben gelten. Diese Einsatzfälle müssen getrennt bewertet werden.
-
-## Generative lokale KI
-
-Der lokale Gemma-Assistent erhält standardmäßig keine Rohframes, keine Personencrops, keine ReID-Embeddings und keine granularen Ereignisdaten. Sein Projekt-RAG schließt `data/`, `logs/` und `models/` aus und redigiert potenzielle Zugangsdaten. Dadurch wird verhindert, dass eine Chat-Frage versehentlich Überwachungsdaten in den Modellkontext zieht.
-
-Externe KI- oder Coding-Dienste sind im Produktionsstandard deaktiviert. Eine spätere optionale externe Eskalation darf nur nach bewusster Aktivierung und mit sichtbarer Vorschau der zu übertragenden Daten erfolgen.
+Je nach Einsatz kann eine Datenschutz-Folgenabschätzung nach Art. 35 DSGVO erforderlich sein. Die Software darf deshalb nicht pauschal behaupten `DSGVO-konform` oder `DSFA nicht erforderlich`. Vor echtem Einsatz muss eine konkrete Standortprüfung erfolgen.
 
 ## Technische Privacy Gates
 
-Vor Kamerastart müssen mindestens folgende Prüfungen erfolgreich sein:
+Vor Kamerastart müssen mindestens folgende Punkte erfüllt sein:
 
-1. `privacy.enabled == true`
-2. lokale Verarbeitung aktiv
-3. externe Telemetrie aus
-4. Videoaufzeichnung aus
-5. Rechtsgrundlage dokumentiert
-6. Zweck dokumentiert
-7. Verantwortlicher und Kontakt dokumentiert
-8. Datenschutzhinweis bestätigt
-9. keine Remote-API ohne Authentifizierung und TLS
-10. keine persistenten ReID-Embeddings
-11. keine Secrets in Repository oder Logs
-12. Kameramasken und Erfassungsbereich vor Ort geprüft
+1. Privacy-Modus aktiv.
+2. Verarbeitung lokal.
+3. Externe Telemetrie deaktiviert.
+4. Videoaufzeichnung deaktiviert.
+5. Zweck und Rechtsgrundlage dokumentiert.
+6. Verantwortlicher und Kontakt dokumentiert.
+7. Datenschutzhinweis bestätigt.
+8. Remote-API außerhalb Loopback nur mit Authentifizierung und TLS.
+9. OSNet-Embeddings nicht persistent.
+10. Keine Gesichtserkennung oder demografische/Emotion-Klassifizierung.
+11. Keine Secrets in Repository oder Logs.
+12. Kamerasichtbereich vor Ort geprüft.
 
-## Offene Punkte für die reale Abnahme
+## Für Jugend forscht
 
-Eine endgültige Bewertung kann erst erfolgen, wenn der konkrete Einsatzort bekannt ist. Dann müssen Kamerawinkel, Sichtbereich, Passantenbezug, organisatorischer Zweck, Hinweisschild, Zugriffsberechtigungen, tatsächliche Aufbewahrung und die Notwendigkeit von ReID geprüft werden.
+Die datenschutzrechtliche Abwägung wird als Teil der Forschungsarbeit dokumentiert. Besonders interessant ist der messbare Vergleich zwischen:
 
-Bis dahin gilt: **technisch datenschutzfreundlich vorbereitet, aber keine pauschale Konformitätszusage.**
+- Detection + Tracking,
+- Detection + Tracking + OSNet,
+- verschiedenen ReID-Zeitfenstern,
+- unterschiedlichen Kamera-/Zonen-Konfigurationen.
+
+Dabei werden Genauigkeitsgewinn und zusätzlicher Datenschutzaufwand gegenübergestellt.
+
+## Offene Abnahme
+
+Vor einem realen produktiven Einsatz müssen Kamerawinkel, Sichtbereich, Personengruppen, Rechtsgrundlage, Hinweisschild, tatsächliche Speicherfristen und die Erforderlichkeit von OSNet am konkreten Ort bewertet werden.
+
+Bis dahin gilt: **OSNet und temporäre Person-IDs sind technisch vorgesehen, aber daraus folgt keine pauschale DSGVO-Konformitätszusage.**
