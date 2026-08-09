@@ -10,6 +10,7 @@ from time import sleep, time
 from .camera_manager import CameraCapture, LatestFrameHub, camera_source_kind
 from .configuration import load_config, privacy_readiness_errors
 from .counter import GlobalCounts
+from .license_guard import LicenseError, enforce_license
 from .logging_setup import configure_logging
 from .production_pipeline import ProductionProcessingPipeline
 from .types import RuntimeStats
@@ -44,6 +45,17 @@ class VisitorCounterService:
         )
 
     def run(self) -> int:
+        try:
+            license_decision = enforce_license(self.project_root)
+        except LicenseError as exc:
+            LOGGER.error("STARTUP_BLOCKED license: %s", exc)
+            return 4
+        LOGGER.info(
+            "LICENSE_OK id=%s online=%s",
+            license_decision.license_id or "not-enforced",
+            license_decision.online_checked,
+        )
+
         errors = privacy_readiness_errors(self.config)
         if errors:
             for error in errors:
