@@ -1,30 +1,32 @@
 [Unit]
-Description=YOLO26x Dual-Camera Visitor Counter
-After=graphical.target
+Description=YOLO26m Dual-Camera Visitor Counter
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=raspibob
 WorkingDirectory=/home/raspibob/PersonenZ-hler
-ExecStart=/home/raspibob/PersonenZ-hler/.venv/bin/python -m visitor_counter.app --project-root /home/raspibob/PersonenZ-hler
-ExecStop=/usr/bin/touch /home/raspibob/PersonenZ-hler/logs/visitor_counter.stop
+ExecStart=/home/raspibob/PersonenZ-hler/.venv/bin/python -m visitor_counter.service
 Restart=on-failure
-RestartSec=10
-StartLimitBurst=5
+RestartSec=3
+StartLimitBurst=10
 StartLimitIntervalSec=300
 KillSignal=SIGINT
 TimeoutStopSec=20
 Environment=PYTHONPATH=/home/raspibob/PersonenZ-hler/src
+# OpenCV/FFmpeg RTSP transport. Keeps WLAN camera traffic on TCP to reduce
+# frame corruption on lossy Wi-Fi. Credentials remain in config.yaml, not here.
+Environment=OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-PrivateNetwork=true
 ProtectSystem=full
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
