@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 _PRODUCT_ID = "PersonenZ-hler"
 _ALLOWED_GITHUB_HOSTS = {"github.com", "api.github.com", "raw.githubusercontent.com"}
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
 
 
 class LicenseError(RuntimeError):
@@ -31,6 +33,18 @@ class LicenseDecision:
     license_id: str = ""
     machine_fingerprint: str = ""
     online_checked: bool = False
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise LicenseError(f"{name} enthält keinen gültigen booleschen Wert")
 
 
 def _canonical_payload(data: dict[str, Any]) -> bytes:
@@ -50,7 +64,7 @@ def _read_machine_id() -> str:
 
 
 def machine_fingerprint() -> str:
-    """Return a privacy-preserving one-way fingerprint for optional device binding."""
+    """Return a one-way device fingerprint for optional license binding."""
     raw = f"{_PRODUCT_ID}|{_read_machine_id()}".encode("utf-8")
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
@@ -59,7 +73,7 @@ def _load_public_key(path: Path) -> Ed25519PublicKey:
     try:
         raw = path.read_bytes()
     except OSError as exc:
-        raise LicenseError(f"Lizenzschlüsseldatei fehlt: {path}") from exc
+        raise LicenseError(f"Lizenz-Public-Key fehlt: {path}") from exc
     try:
         key = serialization.load_pem_public_key(raw)
     except (TypeError, ValueError) as exc:
@@ -82,9 +96,7 @@ def _verify_document(raw: bytes, public_key: Ed25519PublicKey) -> dict[str, Any]
     try:
         signature = base64.b64decode(signature_text, validate=True)
         public_key.verify(signature, _canonical_payload(document))
-    except (ValueError, TypeError) as exc:
-        raise LicenseError("Lizenzsignatur ist ungültig") from exc
-    except Exception as exc:  # cryptography raises InvalidSignature without useful user text
+    except Exception as exc:
         raise LicenseError("Lizenzsignatur ist ungültig") from exc
     return document
 
@@ -138,7 +150,7 @@ def _fetch_online_document(url: str, timeout_seconds: float) -> bytes:
         method="GET",
     )
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - URL is restricted above
+        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - host/scheme are allow-listed above
             return response.read(256_000)
     except HTTPError as exc:
         if exc.code == 404:
@@ -149,19 +161,16 @@ def _fetch_online_document(url: str, timeout_seconds: float) -> bytes:
 
 
 def evaluate_license(project_root: Path) -> LicenseDecision:
-    """Evaluate the explicit, documented license policy.
+    """Validate local signed license and, by default, a matching GitHub entitlement.
 
-    Environment variables:
-      VISITOR_COUNTER_LICENSE_REQUIRED=1
-      VISITOR_COUNTER_LICENSE_FILE=config/license.json
-      VISITOR_COUNTER_LICENSE_PUBLIC_KEY=config/license_public_key.pem
-      VISITOR_COUNTER_LICENSE_URL=https://raw.githubusercontent.com/.../entitlement.json
-      VISITOR_COUNTER_LICENSE_TIMEOUT=5
+    Production defaults are fail-closed. Development can explicitly opt out with
+    VISITOR_COUNTER_LICENSE_REQUIRED=0. The online requirement can only be
+    disabled explicitly with VISITOR_COUNTER_LICENSE_ONLINE_REQUIRED=0.
     """
-    required = os.environ.get("VISITOR_COUNTER_LICENSE_REQUIRED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    required = _env_bool("VISITOR_COUNTER_LICENSE_REQUIRED", True)
     fingerprint = machine_fingerprint()
     if not required:
-        return LicenseDecision(True, "Lizenzprüfung ist für diesen Build nicht erzwungen", machine_fingerprint=fingerprint)
+        return LicenseDecision(True, "Lizenzprüfung wurde explizit für Entwicklung deaktiviert", machine_fingerprint=fingerprint)
 
     license_path = project_root / os.environ.get("VISITOR_COUNTER_LICENSE_FILE", "config/license.json")
     public_key_path = project_root / os.environ.get("VISITOR_COUNTER_LICENSE_PUBLIC_KEY", "config/license_public_key.pem")
@@ -173,8 +182,11 @@ def evaluate_license(project_root: Path) -> LicenseDecision:
     local = _verify_document(local_raw, public_key)
     license_id = _validate_claims(local, fingerprint)
 
+    online_required = _env_bool("VISITOR_COUNTER_LICENSE_ONLINE_REQUIRED", True)
     online_url = os.environ.get("VISITOR_COUNTER_LICENSE_URL", "").strip()
     if not online_url:
+        if online_required:
+            raise LicenseError("GitHub-Freischalt-URL fehlt")
         return LicenseDecision(True, "Signierte lokale Lizenz ist gültig", license_id, fingerprint, False)
 
     try:
