@@ -7,6 +7,7 @@ import subprocess
 from threading import Condition, Event, Thread
 from time import monotonic, sleep, time
 from typing import Callable
+from urllib.parse import urlparse
 
 import cv2
 
@@ -41,13 +42,7 @@ class LatestFrameHub:
             self._condition.notify()
             return replaced
 
-    def get_next(
-        self,
-        camera_order: list[str],
-        last_camera_id: str | None = None,
-        timeout: float = 0.2,
-        max_age_seconds: float | None = None,
-    ) -> FramePacket | None:
+    def get_next(self, camera_order: list[str], last_camera_id: str | None = None, timeout: float = 0.2, max_age_seconds: float | None = None) -> FramePacket | None:
         deadline = monotonic() + timeout
         with self._condition:
             while True:
@@ -67,12 +62,7 @@ class LatestFrameHub:
         with self._condition:
             return dict(self._dropped)
 
-    def _take_ready(
-        self,
-        camera_order: list[str],
-        last_camera_id: str | None,
-        max_age_seconds: float | None,
-    ) -> FramePacket | None:
+    def _take_ready(self, camera_order: list[str], last_camera_id: str | None, max_age_seconds: float | None) -> FramePacket | None:
         ordered = self._rotated_order(camera_order, last_camera_id)
         now = monotonic()
         for camera_id in ordered:
@@ -87,7 +77,8 @@ class LatestFrameHub:
             return packet
         return None
 
-    def _rotated_order(self, camera_order: list[str], last_camera_id: str | None) -> list[str]:
+    @staticmethod
+    def _rotated_order(camera_order: list[str], last_camera_id: str | None) -> list[str]:
         if not camera_order or last_camera_id not in camera_order:
             return camera_order
         start = (camera_order.index(last_camera_id) + 1) % len(camera_order)
@@ -103,6 +94,29 @@ class CameraDeviceInfo:
     model: str
     resolution: str
     status: str
+
+
+def is_network_camera_source(source: str | None) -> bool:
+    if not source:
+        return False
+    return urlparse(source).scheme.lower() in {"rtsp", "rtsps", "http", "https"}
+
+
+def camera_source_kind(source: str | None) -> str:
+    if not source:
+        return "UNCONFIGURED"
+    if is_network_camera_source(source):
+        return "RTSP" if source.lower().startswith(("rtsp://", "rtsps://")) else "HTTP"
+    return "USB"
+
+
+def _safe_source_for_log(source: str) -> str:
+    if not is_network_camera_source(source):
+        return source
+    parsed = urlparse(source)
+    host = parsed.hostname or "camera"
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{host}{port}{parsed.path}"
 
 
 def _safe_resolve(path: Path) -> str:
@@ -122,12 +136,7 @@ def _device_busy(path: str) -> bool:
 
 def _format_summary(video_node: str) -> str:
     try:
-        result = subprocess.run(
-            ["v4l2-ctl", "-d", video_node, "--list-formats-ext"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
+        result = subprocess.run(["v4l2-ctl", "-d", video_node, "--list-formats-ext"], capture_output=True, text=True, timeout=3)
     except Exception:
         return "Aufloesung unbekannt"
     if result.returncode != 0:
@@ -142,12 +151,7 @@ def _format_summary(video_node: str) -> str:
 def _is_usb_frame_capture_device(video_node: str) -> bool:
     try:
         info = subprocess.run(["v4l2-ctl", "-d", video_node, "--info"], capture_output=True, text=True, timeout=2)
-        formats = subprocess.run(
-            ["v4l2-ctl", "-d", video_node, "--list-formats-ext"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
+        formats = subprocess.run(["v4l2-ctl", "-d", video_node, "--list-formats-ext"], capture_output=True, text=True, timeout=3)
     except Exception:
         return False
     if info.returncode != 0 or formats.returncode != 0:
@@ -207,28 +211,20 @@ def discover_camera_devices() -> list[CameraDeviceInfo]:
         status = "belegt" if _device_busy(node) else "frei"
         port = path_by_node.get(node, stable)
         label = f"{manufacturer} {model} - {port} - {node} - {resolution} - {status}"
-        devices.append(
-            CameraDeviceInfo(
-                label=label,
-                stable_path=stable,
-                video_node=node,
-                manufacturer=manufacturer,
-                model=model,
-                resolution=resolution,
-                status=status,
-            )
-        )
+        devices.append(CameraDeviceInfo(label, stable, node, manufacturer, model, resolution, status))
     return devices
 
 
 class CameraCapture(Thread):
-    def __init__(
-        self,
-        config: CameraConfig,
-        output: LatestFrameHub,
-        stop_event: Event,
-        frame_callback: FramePacketCallback | None = None,
-    ) -> None:
+    """Capture worker supporting local V4L2 and WLAN/IP camera streams.
+
+    Network streams are opened with FFmpeg where available. The worker always
+    reconnects after read/open failure and feeds only the newest frame to the
+    inference pipeline, so a stalled WLAN camera cannot create an ever-growing
+    latency backlog.
+    """
+
+    def __init__(self, config: CameraConfig, output: LatestFrameHub, stop_event: Event, frame_callback: FramePacketCallback | None = None) -> None:
         super().__init__(daemon=True, name=f"capture-{config.camera_id}")
         self.config = config
         self.output = output
@@ -236,45 +232,77 @@ class CameraCapture(Thread):
         self.frame_callback = frame_callback
         self.stats = CameraStats()
         self._frame_id = 0
+        self._reconnect_delay_seconds = 1.0
 
     def run(self) -> None:
         while not self.stop_event.is_set():
-            device = self.config.device or self._default_device()
-            if device is None:
+            source = self.config.device or self._default_device()
+            if source is None:
                 self.stats.connected = False
-                self.stats.last_error = "No camera device configured or discovered"
+                self.stats.state = "OFFLINE"
+                self.stats.last_error = "No camera source configured or discovered"
                 sleep(1.0)
                 continue
-            capture = cv2.VideoCapture(device, cv2.CAP_V4L2)
+            self.stats.source = _safe_source_for_log(source)
+            self.stats.transport = camera_source_kind(source)
+            self.stats.state = "CONNECTING" if self.stats.reconnect_count == 0 else "RECONNECTING"
+            capture = self._open_capture(source)
             try:
                 if not capture.isOpened():
-                    self.stats.connected = False
-                    self.stats.last_error = f"Cannot open camera {device}"
-                    LOGGER.error(self.stats.last_error)
-                    sleep(1.0)
+                    self._mark_failure(f"Cannot open camera {self.stats.source}")
+                    sleep(self._reconnect_delay_seconds)
                     continue
-                capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
-                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
-                capture.set(cv2.CAP_PROP_FPS, self.config.fps)
-                capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self._configure_capture(capture, source)
                 self.stats.connected = True
+                self.stats.state = "ONLINE"
+                self.stats.last_error = ""
+                self.stats.connected_since = time()
                 self._capture_loop(capture)
             finally:
                 capture.release()
+                if self.stats.connected:
+                    self.stats.reconnect_count += 1
                 self.stats.connected = False
+                if not self.stop_event.is_set():
+                    self.stats.state = "RECONNECTING"
+                    sleep(self._reconnect_delay_seconds)
+        self.stats.state = "OFFLINE"
+
+    def _open_capture(self, source: str) -> cv2.VideoCapture:
+        if is_network_camera_source(source):
+            return cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        return cv2.VideoCapture(source, cv2.CAP_V4L2)
+
+    def _configure_capture(self, capture: cv2.VideoCapture, source: str) -> None:
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if is_network_camera_source(source):
+            return
+        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
+        capture.set(cv2.CAP_PROP_FPS, self.config.fps)
+
+    def _mark_failure(self, message: str) -> None:
+        self.stats.connected = False
+        self.stats.state = "RECONNECTING"
+        self.stats.last_error = message
+        self.stats.reconnect_count += 1
+        LOGGER.error("%s: %s", self.config.camera_id, message)
 
     def _capture_loop(self, capture: cv2.VideoCapture) -> None:
         last_tick = monotonic()
         frames = 0
         while not self.stop_event.is_set():
             ok, image = capture.read()
-            if not ok:
-                self.stats.last_error = "Camera read failed; reconnecting"
+            if not ok or image is None or image.size == 0:
+                self.stats.decode_errors += 1
+                self.stats.last_error = "Camera read/decode failed; reconnecting"
                 LOGGER.error("%s: %s", self.config.camera_id, self.stats.last_error)
                 break
             self._frame_id += 1
-            packet = FramePacket.from_image(self.config.camera_id, self._frame_id, image, time())
+            captured_at = time()
+            self.stats.last_frame_time = captured_at
+            packet = FramePacket.from_image(self.config.camera_id, self._frame_id, image, captured_at)
             if self.output.put(packet):
                 self.stats.dropped_frames += 1
                 self.stats.queue_replacements += 1
@@ -283,16 +311,6 @@ class CameraCapture(Thread):
                     self.frame_callback(packet)
                 except Exception:
                     LOGGER.exception("FRAME_CALLBACK_FAILED camera=%s frame=%s", self.config.camera_id, self._frame_id)
-            if self._frame_id % 30 == 0:
-                LOGGER.info(
-                    "CAMERA_CAPTURE camera=%s frame=%s shape=%sx%s timestamp=%.3f",
-                    self.config.camera_id,
-                    self._frame_id,
-                    packet.width,
-                    packet.height,
-                    packet.captured_at,
-                )
-                LOGGER.info("FRAME_PUBLISH camera=%s frame=%s", self.config.camera_id, self._frame_id)
             frames += 1
             now = monotonic()
             if now - last_tick >= 1.0:
