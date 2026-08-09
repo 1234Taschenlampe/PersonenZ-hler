@@ -45,3 +45,21 @@ def test_new_local_track_id_can_keep_global_person_id_with_reid() -> None:
     first = manager.update("camera_1", [_track("camera_1", 17, BoundingBox(100, 100, 300, 500), emb)], 10.0, 1280, 720)[0]
     second = manager.update("camera_2", [_track("camera_2", 4, BoundingBox(105, 100, 302, 498), emb)], 12.0, 1280, 720)[0]
     assert first.global_person_id == second.global_person_id
+
+
+def test_strong_reid_keeps_temporary_person_id_beyond_short_match_window() -> None:
+    manager = GlobalIdentityManager(
+        IdentityConfig(reid_threshold=0.62, match_window_seconds=6.0, cache_ttl_seconds=1800.0)
+    )
+    emb = (0.8, 0.6, 0.0, 0.0)
+    first = manager.update("camera_1", [_track("camera_1", 17, BoundingBox(100, 100, 300, 500), emb)], 10.0, 1280, 720)[0]
+    second = manager.update("camera_2", [_track("camera_2", 4, BoundingBox(105, 100, 302, 498), emb)], 40.0, 1280, 720)[0]
+    assert first.global_person_id == second.global_person_id
+
+
+def test_same_appearance_at_exact_same_time_does_not_force_merge() -> None:
+    manager = GlobalIdentityManager(IdentityConfig(reid_threshold=0.62))
+    emb = (1.0, 0.0, 0.0, 0.0)
+    first = manager.update("camera_1", [_track("camera_1", 1, BoundingBox(100, 100, 300, 500), emb)], 10.0, 1280, 720)[0]
+    second = manager.update("camera_2", [_track("camera_2", 2, BoundingBox(900, 100, 1100, 500), emb)], 10.0, 1280, 720)[0]
+    assert first.global_person_id != second.global_person_id
