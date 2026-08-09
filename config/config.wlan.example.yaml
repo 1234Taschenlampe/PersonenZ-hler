@@ -1,0 +1,150 @@
+# Example only. Copy the relevant values into config/config.yaml and replace
+# CAMERA_USER, CAMERA_PASSWORD and the IP/path values with the real cameras.
+# Keep this file free of real credentials before committing it.
+
+cameras:
+  camera_1:
+    camera_id: camera_1
+    device: rtsp://CAMERA_USER:CAMERA_PASSWORD@192.168.50.21:554/REPLACE_WITH_CAMERA_STREAM_PATH
+    width: 1280
+    height: 720
+    fps: 15
+    role: entrance
+    display_name: EINGANG - WLAN Kamera 1
+    line_start: [160, 360]
+    line_end: [1120, 360]
+    in_positive_side: true
+    entry_zone: near
+    exit_zone: far
+    masks: []
+    entry_direction: A_to_B
+    exit_direction: B_to_A
+  camera_2:
+    camera_id: camera_2
+    device: rtsp://CAMERA_USER:CAMERA_PASSWORD@192.168.50.22:554/REPLACE_WITH_CAMERA_STREAM_PATH
+    width: 1280
+    height: 720
+    fps: 15
+    role: exit
+    display_name: AUSGANG - WLAN Kamera 2
+    line_start: [160, 360]
+    line_end: [1120, 360]
+    in_positive_side: true
+    entry_zone: near
+    exit_zone: far
+    masks: []
+    entry_direction: none
+    exit_direction: B_to_A
+
+model:
+  hef_path: models/yolo26m_detection_hailo10h_640.hef
+  model_name: YOLO26m COCO Detection HAILO10H (person filter)
+  target_model_name: YOLO26m COCO Detection HAILO10H (person filter)
+  target_hef_path: models/yolo26m_detection_hailo10h_640.hef
+  custom_target_model_name: YOLO26m COCO Detection HAILO10H (person filter)
+  custom_target_hef_path: models/yolo26m_detection_hailo10h_640.hef
+  require_custom_yolo26m: true
+  detector_fallback_enabled: false
+  allow_fallback: false
+  reid_model_name: OSNet x1.0 HAILO10H
+  reid_hef_path: models/osnet_x1_0_hailo10h.hef
+  reid_required: true
+  postprocess_onnx_path: models/yolo26m_postprocessing.onnx
+  postprocess_config_path: models/config_onnx_yolo26m.json
+  output_format: yolo26_detection
+  model_type: Detection
+  input_size: 640
+  confidence_threshold: 0.35
+  iou_threshold: 0.6
+  max_detections: 300
+  active_detector_policy: Only the official YOLO26m COCO HAILO10H detection HEF may run; inference filters COCO class 0 person and missing or invalid HEF disables detection and counting.
+  detector_candidates:
+    - name: YOLO26m COCO Detection HAILO10H (person filter)
+      path: models/yolo26m_detection_hailo10h_640.hef
+      role: required_runtime
+
+tracking:
+  tracker: bytetrack
+  max_lost_frames: 20
+  min_hits_before_counting: 5
+  min_confirmed_hits: 5
+  iou_match_threshold: 0.2
+  min_confirmed_track_hits: 5
+  min_stable_zone_frames: 3
+  count_cooldown_seconds: 2.0
+  minimum_confidence: 0.35
+  zone_hysteresis_pixels: 25.0
+  maximum_track_age: 30
+  minimum_bbox_area: 1000.0
+
+identity:
+  match_window_seconds: 6.0
+  stale_seconds: 3.0
+  reid_threshold: 0.62
+  hysteresis_seconds: 1.5
+  reid_update_interval_seconds: 2.0
+  cache_ttl_seconds: 1800.0
+  live_entry_min_frames: 3
+  live_exit_grace_seconds: 2.0
+  live_min_confidence: 0.35
+  live_min_bbox_area: 2500.0
+  live_min_aspect_ratio: 0.18
+  live_max_aspect_ratio: 1.40
+
+consensus:
+  enabled: true
+  transition_window_seconds: 3.0
+  uncertain_window_seconds: 6.0
+  expected_travel_seconds: 1.5
+  bbox_area_ratio_tolerance: 0.7
+  event_lock_seconds: 8.0
+
+timeout:
+  presence_timeout_enabled: true
+  presence_timeout_minutes: 60
+
+database:
+  path: data/person_counter.sqlite3
+  store_video_frames: false
+  store_events: false
+  retention_hours: 24
+  encryption_required: true
+  encryption_key_env: VISITOR_COUNTER_DATA_KEY
+  encryption_key_file: ''
+
+display:
+  display_raw_frames_only: false
+  raw_frame_overlay: true
+  show_camera_preview: false
+  anonymization_mode: full_frame
+  pixel_size: 24
+
+privacy:
+  enabled: true
+  local_processing_only: true
+  telemetry_enabled: false
+  video_stream_enabled: false
+  remove_stream_frames_on_shutdown: true
+  privacy_notice_acknowledged: false
+  privacy_notice_acknowledged_at: ''
+  legal_basis: ''
+  purpose: anonymous occupancy counting
+  controller_name: ''
+  controller_contact: ''
+  consent_required: false
+  consent_recorded: false
+
+api:
+  enabled: true
+  bind_host: 127.0.0.1
+  port: 8766
+  require_auth: true
+  viewer_token_env: VISITOR_COUNTER_VIEWER_TOKEN
+  operator_token_env: VISITOR_COUNTER_OPERATOR_TOKEN
+  admin_token_env: VISITOR_COUNTER_ADMIN_TOKEN
+  minimum_token_length: 32
+  tls_certificate: ''
+  tls_private_key: ''
+  allowed_origins: []
+  max_requests_per_minute: 120
+  audit_retention_days: 30
