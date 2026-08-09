@@ -1,153 +1,91 @@
-# YOLO26m Dual-Kamera Besucherzaehler
+# PersonenZähler V2
 
-Native PySide6-Desktop-Anwendung fuer einen Raspberry Pi 5 mit Hailo-10H und zwei Kameras.
+Lokaler Dual-Kamera-Personenzähler für Raspberry Pi 5 + Hailo-10H. Ziel ist eine robuste Ein-/Ausgangszählung mit möglichst wenig dauerhaft gespeicherten personenbezogenen Daten.
 
-Das Laufzeitsystem verwendet das YOLO26m COCO Detection HEF fuer Hailo-10H und filtert auf COCO-Klasse `person`. Es soll keine CPU-Inferenz, OpenCV-DNN, Dummy-Daten oder Pose-HEFs als Ersatz fuer die produktive Detektion verwenden.
-
-## Hardware
-
-- Raspberry Pi 5 mit 64-bit Raspberry Pi OS oder kompatiblem Debian
-- Hailo-10H
-- Zwei V4L2-kompatible USB-Kameras
-- Empfohlen: stabile Kamera-Pfade unter `/dev/v4l/by-path/` oder `/dev/v4l/by-id/`
-
-## Installation
-
-```bash
-git clone <repo> Ki-kammera-pi
-cd Ki-kammera-pi
-./scripts/install.sh
-./scripts/check_hardware.sh
-```
-
-## HailoRT pruefen
-
-```bash
-hailortcli --version
-hailortcli fw-control identify
-```
-
-Wenn diese Befehle fehlen oder kein Geraet melden, startet die App, aber Hailo-Inferenz bleibt sichtbar nicht bereit.
-
-## Kameraerkennung
-
-```bash
-v4l2-ctl --list-devices
-ls -l /dev/v4l/by-path/
-ls -l /dev/video*
-```
-
-Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen. Metadaten-Nodes wie `/dev/video1` oder `/dev/video3` werden nicht als Bildquellen verwendet, wenn sie keine Frames liefern.
-
-## Programmstart
-
-Vor dem ersten Kamerastart muessen Rechtsgrundlage, Zweck, Verantwortlicher, Kontakt und der sichtbar angebrachte Datenschutzhinweis in `config/config.yaml` dokumentiert werden. Ohne diese Freigabe startet die Kameraverarbeitung nicht. Details: [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
-
-```bash
-./scripts/start.sh
-```
-
-Alternativ:
-
-```bash
-PYTHONPATH=src python3 -m visitor_counter.app --project-root "$PWD"
-```
-
-## Desktop-Icon
-
-Auf dem Raspberry Pi:
-
-```bash
-./scripts/install_desktop_icon.sh
-```
-
-Das erstellt:
+## Zielarchitektur
 
 ```text
-~/Desktop/Personenzaehler.desktop
-~/.local/share/applications/personenzaehler.desktop
+WLAN-Kamera 1 ─┐
+                ├─ eigener Router ─ Raspberry Pi 5 + Hailo-10H
+WLAN-Kamera 2 ─┘                         │
+                                        ├─ YOLO26m Person Detection
+                                        ├─ lokales Tracking
+                                        ├─ OSNet ReID
+                                        ├─ A/neutral/B-Zonenlogik
+                                        ├─ Dual-Camera-Consensus
+                                        ├─ SQLite / lokale API
+                                        └─ zwei lokale Displays
 ```
 
-Der Launcher verwendet `scripts/start_gui.sh`, startet den vorhandenen `visitor-counter.service` bei Bedarf und verhindert doppelte GUI-Starts.
+Die Kameras können RTSP/RTSPS/HTTP/HTTPS liefern; USB/V4L2 bleibt für Entwicklung und Tests unterstützt. Der Pi sollte am eigenen Router nach Möglichkeit per Ethernet hängen.
 
-## GUI-Bedienung
+## Zähllogik
 
-Die Anwendung zeigt standardmaessig keine Livebilder. Die Kameraflaechen bleiben im Datenschutzmodus verdeckt; Zaehler, Modellstatus, Kameraauswahl und Diagnosewerte bleiben sichtbar. Eine Vorschau muss bewusst aktiviert werden und bleibt anonymisiert.
+YOLO26m erkennt nur Personen. Lokales Tracking hält Bewegungsverläufe innerhalb einer Kamera stabil. OSNet erzeugt kurzlebige Merkmalsvektoren zur kameraübergreifenden Wiedererkennung. Eine Zählung entsteht erst durch die deterministische Passage-Logik aus Zonenfolge, Richtung, Zeitfenster und Consensus. ReID allein darf keine Person zählen.
 
-Wichtige Zaehlwerte:
+`inside`, `entered` und `exited` werden in der neuen Produktionspipeline nur durch bestätigte Crossing-/Consensus-Ereignisse verändert. Sichtbarkeit ist davon getrennte Telemetrie.
 
-- `global inside`: aktuell stabil anwesende globale Personen
-- `global in`: bestaetigte globale Eintritte
-- `global out`: bestaetigte globale Austritte
-- `camera 1/2 visible`: aktuell sichtbare Personen pro Kamera
-- `suppressed`: unterdrueckte Doppelzaehlungen
-- `uncertain`: unsichere Ereignisse
+## Datenschutzstandard
 
-## Zaehllogik
+- Verarbeitung lokal auf Pi/Hailo
+- keine Cloud-Telemetrie
+- keine Gesichtserkennung und keine Namenszuordnung
+- keine dauerhafte Speicherung von Video oder Einzelbildern
+- ReID-Embeddings nur temporär im RAM
+- granulare Ereignisspeicherung standardmäßig aus
+- Remote-API nur mit Authentifizierung; außerhalb Loopback zusätzlich TLS
+- Kamerabetrieb wird blockiert, solange Betreiber-, Zweck- und Datenschutzhinweis-Felder nicht ausgefüllt sind
 
-Die globale Live-Zaehlung ist von der Anzeige sichtbarer Personen getrennt. Eine Person wird erst nach mehreren bestaetigten Frames als `inside` gezaehlt. Wenn sie verschwindet, wartet die Pipeline eine kurze Grace-Zeit, bevor `inside` sinkt und `global out` steigt.
+Lokale Verarbeitung bedeutet nicht automatisch DSGVO-Konformität. Der konkrete Standort und Einsatzzweck müssen separat geprüft werden. Siehe [Datenschutzprüfung Deutschland 2026](docs/PRIVACY_GERMANY_2026.md) und [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
 
-Vor Tracking werden nur echte Personendetektionen mit ausreichender Konfidenz, sinnvoller Groesse und plausibler Box-Form verwendet. Re-ID ist im sicheren Standard deaktiviert.
+## Digital Twin
 
-Es werden keine Gesichter erkannt, keine Namen gespeichert und keine dauerhaften biometrischen Gesichtsdaten abgelegt.
+Der Hardware-freie Emulator verwendet die echte Tracking-, Identity-, Zonen- und Consensus-Logik, ersetzt aber Kamera, YOLO/Hailo und OSNet durch deterministische synthetische Daten.
 
-## Datenbank
+```bash
+PYTHONPATH=src python -m visitor_counter.emulator
+```
 
-Die lokale SQLite-Datenbank speichert standardmaessig nur aggregierte Zaehler. Granulare Ereignisse sind aus; optional aktivierte Ereignisse erfordern einen externen Verschluesselungsschluessel, werden pseudonymisiert und nach kurzer Frist automatisch geloescht.
+Grafisch:
 
-## Tests
+```bash
+PYTHONPATH=src python -m visitor_counter.emulator_gui
+```
 
-Normale Tests:
+Details: [Digital-Twin-Emulator](docs/EMULATOR.md).
+
+## Lokaler KI-Assistent
+
+Ein lokaler Projektassistent ist vorbereitet. Standardmodell ist Gemma 4 E2B Instruct über einen ausschließlich auf Loopback erreichbaren `llama.cpp`-Server. Er durchsucht freigegebene Projektdateien lokal, erklärt das System und kann kleine Änderungen vorschlagen. Änderungen werden nie autonom angewendet, sondern benötigen eine explizite Bestätigung und passieren eine deterministische Sicherheitsprüfung.
+
+Details: [Lokaler Projektassistent](docs/LOCAL_AGENT.md).
+
+## Tests und CI
 
 ```bash
 pytest
+PYTHONPATH=src python -m visitor_counter.emulator
 ```
 
-Hardwaretests auf dem Raspberry Pi:
+GitHub Actions führt Unit-Tests, Digital-Twin-Abnahmetests, Python-Compile-Checks, Bandit-Audit, Dependency-Audit und Secret-Pattern-Prüfung aus. Hardwaretests bleiben separat markiert:
 
 ```bash
 pytest -m hardware
 ```
 
-Secret-Erzeugung, TLS, Rollen, Export und Loeschung sind in [docs/PRIVACY_AND_SECURITY.md](docs/PRIVACY_AND_SECURITY.md) beschrieben.
+## WLAN-Konfiguration
 
-## Deployment auf den Raspberry Pi
+`config/config.wlan.example.yaml` enthält eine Vorlage ohne echte Zugangsdaten. Reale RTSP-Benutzer, Passwörter und URLs gehören nicht ins Repository.
 
-Wenn der Pi erreichbar ist:
+## Dokumentation
 
-```powershell
-.\tools\deploy_pi_live_counter_fix.ps1
-```
+- [Architektur V2](docs/ARCHITECTURE_V2.md)
+- [Digital Twin](docs/EMULATOR.md)
+- [Datenschutz Deutschland 2026](docs/PRIVACY_GERMANY_2026.md)
+- [Datenschutz und Sicherheit](docs/PRIVACY_AND_SECURITY.md)
+- [Lokaler Gemma-Assistent](docs/LOCAL_AGENT.md)
+- [Jugend-forscht-Projektdokumentation](docs/JUGEND_FORSCHT_PROJECT.md)
 
-Das Skript kopiert die relevanten Fix-Dateien auf den Pi, fuehrt die wichtigsten Tests aus, startet `visitor-counter.service` neu und zeigt relevante Logzeilen.
+## Status
 
-## systemd Autostart
-
-User-Service auf dem Raspberry Pi:
-
-```bash
-systemctl --user status visitor-counter.service
-systemctl --user restart visitor-counter.service
-journalctl --user -u visitor-counter.service -f
-```
-
-System-Service, falls genutzt:
-
-```bash
-sudo cp systemd/visitor-counter.service /etc/systemd/system/visitor-counter.service
-sudo systemctl daemon-reload
-sudo systemctl enable visitor-counter.service
-sudo systemctl start visitor-counter.service
-```
-
-## Fehlerdiagnose
-
-```bash
-./scripts/check_hardware.sh
-PYTHONPATH=src python3 -c "from pathlib import Path; from visitor_counter.diagnostics import collect_diagnostics; collect_diagnostics(Path.cwd())"
-cat logs/diagnostics_report.json
-```
-
-## GitHub Pages Konzeptseite
-
-`index.html` stammt aus der vorherigen GitHub-`main`-Historie und beschreibt eine animierte Konzeptseite fuer das KI-Kameraprojekt. Sie ist nicht der produktive Raspberry-Pi-Runtime-Code.
+Die V2-Änderungen liegen bewusst in einem Draft-PR. Logik und Software können über CI und Emulator getestet werden. Aussagen zu realer Erkennungsgenauigkeit, Hailo-Leistung, thermischem Verhalten und WLAN-Stabilität werden erst nach Messungen auf der Zielhardware getroffen.
