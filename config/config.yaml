@@ -50,7 +50,7 @@ model:
     role: required_runtime
   reid_model_name: OSNet x1.0 HAILO10H
   reid_hef_path: models/osnet_x1_0_hailo10h.hef
-  reid_required: false
+  reid_required: true
   postprocess_onnx_path: models/yolo26m_postprocessing.onnx
   postprocess_config_path: models/config_onnx_yolo26m.json
   output_format: yolo26_detection
@@ -110,7 +110,7 @@ privacy:
   privacy_notice_acknowledged: false
   privacy_notice_acknowledged_at: ''
   legal_basis: ''
-  purpose: anonymous occupancy counting
+  purpose: anonymous occupancy counting with daily unique-visitor statistics
   controller_name: ''
   controller_contact: ''
   consent_required: false
