@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install -e .
 mkdir -p logs data models
-echo "Installiert. Start: ./scripts/start.sh"
+echo "Installiert. Start: ./scripts/start_gui.sh"

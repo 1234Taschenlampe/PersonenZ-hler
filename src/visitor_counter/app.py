@@ -25,15 +25,15 @@ def main() -> int:
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--test-global-counter", action="store_true", help="Run the synthetic global counter validation test")
     args = parser.parse_args()
-    
+
     project_root = args.project_root.resolve()
     if args.test_global_counter:
         db_path = project_root / "data" / "events.db"
         sha_before = get_db_sha256(db_path)
         print(f"Production database SHA-256 before test: {sha_before}")
-        
+
         result = run_synthetic_counter_test(project_root)
-        
+
         sha_after = get_db_sha256(db_path)
         print(f"Production database SHA-256 after test:  {sha_after}")
         if sha_before == sha_after:
@@ -41,10 +41,13 @@ def main() -> int:
         else:
             print("WARNING: Production database was modified during the test!")
         return result
-        
-    from .gui import run_gui
 
-    return run_gui(project_root)
+    from . import gui as gui_module
+    from .enhanced_counting import EnhancedProcessingPipeline, install_enhanced_gui
+
+    gui_module.ProcessingPipeline = EnhancedProcessingPipeline
+    install_enhanced_gui(gui_module)
+    return gui_module.run_gui(project_root)
 
 
 if __name__ == "__main__":

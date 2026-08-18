@@ -4,9 +4,25 @@ Native PySide6-Desktop-Anwendung fuer einen Raspberry Pi 5 mit Hailo-10H und zwe
 
 Das Laufzeitsystem verwendet das YOLO26m COCO Detection HEF fuer Hailo-10H und filtert auf COCO-Klasse `person`. Es soll keine CPU-Inferenz, OpenCV-DNN, Dummy-Daten oder Pose-HEFs als Ersatz fuer die produktive Detektion verwenden.
 
+## Zaehlkonzept
+
+Die produktiven Zaehlwerte sind klar getrennt:
+
+- **Aktuell im Gebaeude:** steigt bei einem bestaetigten Eintritt um 1 und sinkt bei einem bestaetigten Austritt um 1.
+- **Besucher heute (eindeutig):** dieselbe Person soll pro lokalem Kalendertag nur einmal gezaehlt werden. Dafuer wird OSNet-ReID verwendet.
+- **Eintritte gesamt:** jeder bestaetigte Eintritt erhoeht diesen persistenten Zaehler.
+- **Austritte gesamt:** jeder bestaetigte Austritt erhoeht diesen persistenten Zaehler.
+- **Durchfluss gesamt:** `Eintritte gesamt + Austritte gesamt`.
+
+Die Belegung wird damit nicht mehr aus der blossen Sichtbarkeit in einem Kamerabild abgeleitet. Sichtbare Personen bleiben ein Diagnosewert; die Belegung aendert sich nur durch akzeptierte Linienuebertritte.
+
+Fuer den eindeutigen Tageszaehler werden Re-ID-Embeddings nur fuer den aktiven Tag vorgehalten. Ist `VISITOR_COUNTER_DATA_KEY` gesetzt, werden diese Tagesprofile verschluesselt lokal in `data/daily_unique.sqlite3` abgelegt, damit ein Neustart nicht automatisch zu Doppelzaehlungen fuehrt. Beim Tageswechsel werden alte Tagesprofile geloescht. Ohne Schluessel arbeitet der Tageszaehler nur im RAM und ist nach einem Neustart nicht vollstaendig deduplizierungssicher.
+
 ## Privacy & GDPR
 
-Das Projekt ist auf **lokale Verarbeitung und datenschutzfreundliche Voreinstellungen** ausgelegt. Im sicheren Standardbetrieb werden Kamerabilder nur fuer die laufende Personenerkennung verarbeitet und nicht dauerhaft als Video oder Einzelbild gespeichert. Gesichtserkennung und die Speicherung dauerhafter biometrischer Gesichtsdaten sind nicht vorgesehen. Granulare Personenereignisse sind standardmaessig deaktiviert; aktiviert der Betreiber sie bewusst, verlangt das System einen externen Verschluesselungsschluessel und verwendet Pseudonymisierung sowie eine begrenzte Aufbewahrungsdauer.
+Das Projekt ist auf **lokale Verarbeitung und datenschutzfreundliche Voreinstellungen** ausgelegt. Im sicheren Standardbetrieb werden Kamerabilder nur fuer die laufende Personenerkennung verarbeitet und nicht dauerhaft als Video oder Einzelbild gespeichert. Gesichtserkennung und Namenszuordnung sind nicht vorgesehen. Granulare Personenereignisse sind standardmaessig deaktiviert.
+
+Der optionale bzw. fuer den eindeutigen Tageszaehler aktivierte OSNet-ReID-Mechanismus verarbeitet Merkmalsvektoren aus dem Erscheinungsbild einer Person, um Wiederholungsbesuche am selben Tag zu erkennen. Diese Re-ID-Profile werden nicht als dauerhaftes Personenregister verwendet: sie gelten nur fuer den aktiven Kalendertag, werden lokal verarbeitet und bei vorhandener Persistenz verschluesselt gespeichert. Vor einem realen Einsatz muss der Betreiber die datenschutzrechtliche Zulaessigkeit dieses Re-ID-Zwecks gesondert pruefen.
 
 Weitere Schutzmechanismen umfassen standardmaessig deaktivierte Live-/Remote-Videostreams, lokale API-Bindung an `127.0.0.1`, rollenbasierte API-Tokens, kurze Datenaufbewahrung und technische Sperren vor dem Kamerastart, solange die erforderlichen Betreiberangaben nicht dokumentiert sind.
 
@@ -27,9 +43,24 @@ Dokumentation:
 
 ## Installation
 
+Fuer Raspberry Pi OS/Debian steht ein zusammengefasster Installer bereit:
+
 ```bash
-git clone <repo> Ki-kammera-pi
-cd Ki-kammera-pi
+./scripts/install_linux_app.sh
+```
+
+Er installiert die normalen Linux-Abhaengigkeiten, erstellt die Python-Umgebung mit Zugriff auf systemweite Hailo-Bindings, erzeugt lokale Secrets, installiert Desktop-Starter und Autostart und prueft HailoRT. Fehlt HailoRT auf Raspberry Pi OS, versucht der Installer das offizielle `hailo-all`-Paket zu installieren.
+
+Die projektspezifischen HEF-Dateien muessen unter folgenden Pfaden vorhanden sein:
+
+```text
+models/yolo26m_detection_hailo10h_640.hef
+models/osnet_x1_0_hailo10h.hef
+```
+
+Manuelle Installation:
+
+```bash
 ./scripts/install.sh
 ./scripts/check_hardware.sh
 ```
@@ -41,7 +72,7 @@ hailortcli --version
 hailortcli fw-control identify
 ```
 
-Wenn diese Befehle fehlen oder kein Geraet melden, startet die App, aber Hailo-Inferenz bleibt sichtbar nicht bereit.
+Wenn diese Befehle fehlen oder kein Geraet melden, startet die App nicht in den produktiven Detektions-/Re-ID-Betrieb.
 
 ## Kameraerkennung
 
@@ -58,7 +89,7 @@ Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen. Me
 Vor dem ersten Kamerastart muessen Rechtsgrundlage, Zweck, Verantwortlicher, Kontakt und der sichtbar angebrachte Datenschutzhinweis in `config/config.yaml` dokumentiert werden. Ohne diese Freigabe startet die Kameraverarbeitung nicht. Details: [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
 
 ```bash
-./scripts/start.sh
+./scripts/start_gui.sh
 ```
 
 Alternativ:
@@ -90,24 +121,20 @@ Die Anwendung zeigt standardmaessig keine Livebilder. Die Kameraflaechen bleiben
 
 Wichtige Zaehlwerte:
 
-- `global inside`: aktuell stabil anwesende globale Personen
-- `global in`: bestaetigte globale Eintritte
-- `global out`: bestaetigte globale Austritte
-- `camera 1/2 visible`: aktuell sichtbare Personen pro Kamera
-- `suppressed`: unterdrueckte Doppelzaehlungen
-- `uncertain`: unsichere Ereignisse
-
-## Zaehllogik
-
-Die globale Live-Zaehlung ist von der Anzeige sichtbarer Personen getrennt. Eine Person wird erst nach mehreren bestaetigten Frames als `inside` gezaehlt. Wenn sie verschwindet, wartet die Pipeline eine kurze Grace-Zeit, bevor `inside` sinkt und `global out` steigt.
-
-Vor Tracking werden nur echte Personendetektionen mit ausreichender Konfidenz, sinnvoller Groesse und plausibler Box-Form verwendet. Re-ID ist im sicheren Standard deaktiviert.
-
-Es werden keine Gesichter erkannt, keine Namen gespeichert und keine dauerhaften biometrischen Gesichtsdaten abgelegt.
+- `Aktuell im Gebaeude`
+- `Besucher heute (eindeutig)`
+- `Durchfluss gesamt`
+- `Eintritte gesamt`
+- `Austritte gesamt`
+- sichtbare Personen pro Kamera
+- unterdrueckte Doppelzaehlungen
+- unsichere Ereignisse
 
 ## Datenbank
 
-Die lokale SQLite-Datenbank speichert standardmaessig nur aggregierte Zaehler. Granulare Ereignisse sind aus; optional aktivierte Ereignisse erfordern einen externen Verschluesselungsschluessel, werden pseudonymisiert und nach kurzer Frist automatisch geloescht.
+Die lokale SQLite-Hauptdatenbank speichert standardmaessig nur aggregierte Zaehler. Granulare Ereignisse sind aus; optional aktivierte Ereignisse erfordern einen externen Verschluesselungsschluessel, werden pseudonymisiert und nach kurzer Frist automatisch geloescht.
+
+Der eindeutige Tageszaehler verwendet bei vorhandenem `VISITOR_COUNTER_DATA_KEY` zusaetzlich `data/daily_unique.sqlite3`. Dort liegen nur verschluesselte Re-ID-Embeddings des aktiven Tages sowie Zeitstempel. Alte Tagesprofile werden beim Tageswechsel geloescht.
 
 ## Tests
 
@@ -137,21 +164,18 @@ Das Skript kopiert die relevanten Fix-Dateien auf den Pi, fuehrt die wichtigsten
 
 ## systemd Autostart
 
-User-Service auf dem Raspberry Pi:
+Der empfohlene User-Service wird durch `scripts/install_autostart.sh` erzeugt. Er laedt die lokalen Secrets aus:
+
+```text
+~/.config/personenzaehler/api.env
+```
+
+Status und Neustart:
 
 ```bash
 systemctl --user status visitor-counter.service
 systemctl --user restart visitor-counter.service
 journalctl --user -u visitor-counter.service -f
-```
-
-System-Service, falls genutzt:
-
-```bash
-sudo cp systemd/visitor-counter.service /etc/systemd/system/visitor-counter.service
-sudo systemctl daemon-reload
-sudo systemctl enable visitor-counter.service
-sudo systemctl start visitor-counter.service
 ```
 
 ## Fehlerdiagnose
