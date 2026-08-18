@@ -110,7 +110,7 @@ privacy:
   privacy_notice_acknowledged: false
   privacy_notice_acknowledged_at: ''
   legal_basis: ''
-  purpose: anonymous occupancy counting with daily unique-visitor statistics
+  purpose: occupancy counting and daily unique-visitor statistics using local ReID
   controller_name: ''
   controller_contact: ''
   consent_required: false
