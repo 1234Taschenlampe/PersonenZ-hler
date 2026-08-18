@@ -7,6 +7,7 @@ LOG_DIR="$PROJECT_DIR/logs"
 LOG_FILE="$LOG_DIR/gui_launcher.log"
 LOCK_FILE="$LOG_DIR/gui_launcher.lock"
 PID_FILE="$LOG_DIR/gui_launcher.pid"
+SECRETS_FILE="$HOME/.config/personenzaehler/api.env"
 mkdir -p "$LOG_DIR"
 
 show_error() {
@@ -59,6 +60,13 @@ cd "$PROJECT_DIR" || { show_error "Projektverzeichnis konnte nicht geoeffnet wer
 if [ ! -x "$PROJECT_DIR/.venv/bin/python" ]; then
   show_error "Python-Umgebung fehlt: $PROJECT_DIR/.venv/bin/python"
   exit 3
+fi
+
+if [ -f "$SECRETS_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$SECRETS_FILE"
+  set +a
 fi
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
