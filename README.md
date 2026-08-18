@@ -4,6 +4,20 @@ Native PySide6-Desktop-Anwendung fuer einen Raspberry Pi 5 mit Hailo-10H und zwe
 
 Das Laufzeitsystem verwendet das YOLO26m COCO Detection HEF fuer Hailo-10H und filtert auf COCO-Klasse `person`. Es soll keine CPU-Inferenz, OpenCV-DNN, Dummy-Daten oder Pose-HEFs als Ersatz fuer die produktive Detektion verwenden.
 
+## Privacy & GDPR
+
+Das Projekt ist auf **lokale Verarbeitung und datenschutzfreundliche Voreinstellungen** ausgelegt. Im sicheren Standardbetrieb werden Kamerabilder nur fuer die laufende Personenerkennung verarbeitet und nicht dauerhaft als Video oder Einzelbild gespeichert. Gesichtserkennung und die Speicherung dauerhafter biometrischer Gesichtsdaten sind nicht vorgesehen. Granulare Personenereignisse sind standardmaessig deaktiviert; aktiviert der Betreiber sie bewusst, verlangt das System einen externen Verschluesselungsschluessel und verwendet Pseudonymisierung sowie eine begrenzte Aufbewahrungsdauer.
+
+Weitere Schutzmechanismen umfassen standardmaessig deaktivierte Live-/Remote-Videostreams, lokale API-Bindung an `127.0.0.1`, rollenbasierte API-Tokens, kurze Datenaufbewahrung und technische Sperren vor dem Kamerastart, solange die erforderlichen Betreiberangaben nicht dokumentiert sind.
+
+**Wichtig:** Diese technischen Massnahmen machen einen konkreten Einsatz nicht automatisch DSGVO-konform. Der Betreiber muss insbesondere Zweck, Rechtsgrundlage, Erfassungsbereich, Transparenzinformation, Speicherdauer, Zugriffsrechte und gegebenenfalls die Erforderlichkeit einer Datenschutz-Folgenabschaetzung fuer den jeweiligen Einsatz pruefen.
+
+Dokumentation:
+
+- [DSGVO-Dokumentation](docs/DSGVO_DOKUMENTATION.md)
+- [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md)
+- [Vorlage fuer den Datenschutz-Hinweis am Kamerabereich](docs/PRIVACY_NOTICE_TEMPLATE.md)
+
 ## Hardware
 
 - Raspberry Pi 5 mit 64-bit Raspberry Pi OS oder kompatiblem Debian
