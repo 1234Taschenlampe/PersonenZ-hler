@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GUI runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install project and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest PyYAML opencv-python-headless ruff
+      - name: Static checks
+        run: ruff check --select F,E9 src tests scripts packaging/linux/personenzaehler-admin
+      - name: Compile Python sources
+        run: python -m compileall -q src scripts tests
+      - name: Unit tests
+        run: pytest -m "not hardware" -q
+      - name: Digital twin acceptance suite
+        run: PYTHONPATH=src python -m visitor_counter.emulator
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install security tools
+        run: python -m pip install bandit pip-audit
+      - name: Bandit audit
+        continue-on-error: true
+        run: bandit -r src scripts -x tests
+      - name: Dependency audit
+        run: pip-audit -r requirements.txt
+      - name: Repository secret-pattern guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Tests contain explicit fake credentials to verify redaction and URL handling.
+          if git grep -nEI '(rtsp|https?)://[^[:space:]/]+:[^[:space:]@]+@|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk-[A-Za-z0-9_-]{20,}' -- ':!docs/**' ':!tests/**' ':!*.example.*'; then
+            echo 'Potential credential material found in tracked production files.' >&2
+            exit 1
+          fi
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package test tools
+        run: python -m pip install pytest PyYAML
+      - name: Verify reproducible package contract
+        run: pytest tests/packaging -q
+      - name: Build ARM64 Debian package
+        run: python scripts/build_deb.py --architecture arm64 --output dist/personenzaehler_1.0.0_arm64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: personenzaehler-1.0.0-arm64-deb
+          path: dist/personenzaehler_1.0.0_arm64.deb
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Android unit tests and debug build
+        working-directory: android-app
+        run: gradle --no-daemon testDebugUnitTest assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: personenzaehler-android-debug
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

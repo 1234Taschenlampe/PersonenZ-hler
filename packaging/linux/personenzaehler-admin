@@ -1,0 +1,205 @@
+#!/usr/bin/python3
+from __future__ import annotations
+
+import grp
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ALLOWED_UNITS = {"personenzaehler.service", "personenzaehler-api.service"}
+ALLOWED_ACTIONS = {"start", "stop", "restart"}
+MODEL_TARGETS = {
+    "detector": Path(
+        "/var/lib/personenzaehler/models/yolo26m_detection_hailo10h_640.hef"
+    ),
+    "reid": Path("/var/lib/personenzaehler/models/osnet_x1_0_hailo10h.hef"),
+}
+DOCUMENT_TARGETS = {
+    "install-config": (
+        Path("/etc/personenzaehler/config.yaml"),
+        {".yaml"},
+        1,
+        1_000_000,
+        0o644,
+    ),
+    "install-license": (
+        Path("/etc/personenzaehler/license.json"),
+        {".json"},
+        32,
+        256_000,
+        0o644,
+    ),
+    "install-tls-certificate": (
+        Path("/etc/personenzaehler/tls.crt"),
+        {".crt", ".pem"},
+        32,
+        1_000_000,
+        0o644,
+    ),
+    "install-tls-private-key": (
+        Path("/etc/personenzaehler/tls.key"),
+        {".key", ".pem"},
+        32,
+        1_000_000,
+        0o640,
+    ),
+}
+
+
+def copy_checked(
+    source: Path, target: Path, *, minimum: int, maximum: int, mode: int, group_id: int
+) -> int:
+    temporary_name = ""
+    descriptor = -1
+    try:
+        descriptor = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        source_stat = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(source_stat.st_mode)
+            or not minimum <= source_stat.st_size <= maximum
+        ):
+            raise ValueError("Unplausible Dateigröße")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        handle, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.name}.", dir=target.parent
+        )
+        with (
+            os.fdopen(descriptor, "rb") as origin,
+            os.fdopen(handle, "wb") as destination,
+        ):
+            descriptor = -1
+            shutil.copyfileobj(origin, destination, length=1024 * 1024)
+            destination.flush()
+            os.fsync(destination.fileno())
+        temporary = Path(temporary_name)
+        os.chown(temporary, 0, group_id)
+        temporary.chmod(mode)
+        temporary.replace(target)
+    except (OSError, ValueError) as exc:
+        print(f"Installation fehlgeschlagen: {exc}", file=sys.stderr)
+        return 74
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
+    return 0
+
+
+def install_model(kind: str, source_text: str) -> int:
+    target = MODEL_TARGETS.get(kind)
+    source = Path(source_text)
+    if (
+        target is None
+        or not source.is_absolute()
+        or source.suffix.lower() != ".hef"
+        or source.is_symlink()
+    ):
+        print("Ungültige Modelldatei.", file=sys.stderr)
+        return 64
+    return copy_checked(
+        source, target, minimum=1024, maximum=2_000_000_000, mode=0o644, group_id=0
+    )
+
+
+def install_document(action: str, source_text: str) -> int:
+    target, suffixes, minimum, maximum, mode = DOCUMENT_TARGETS[action]
+    source = Path(source_text)
+    if (
+        not source.is_absolute()
+        or source.suffix.lower() not in suffixes
+        or source.is_symlink()
+    ):
+        print("Ungültige Quelldatei.", file=sys.stderr)
+        return 64
+    try:
+        group_id = grp.getgrnam("personenzaehler").gr_gid
+    except KeyError:
+        group_id = 0
+    return copy_checked(
+        source,
+        target,
+        minimum=minimum,
+        maximum=maximum,
+        mode=mode,
+        group_id=group_id,
+    )
+
+
+def read_viewer_token() -> int:
+    try:
+        lines = (
+            Path("/etc/personenzaehler/api.env")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+    except OSError as exc:
+        print(f"Viewer-Token konnte nicht gelesen werden: {exc}", file=sys.stderr)
+        return 74
+    prefix = "VISITOR_COUNTER_VIEWER_TOKEN="
+    token = next(
+        (
+            line.removeprefix(prefix).strip()
+            for line in lines
+            if line.startswith(prefix)
+        ),
+        "",
+    )
+    if len(token) < 32:
+        print("Viewer-Token fehlt oder ist ungültig.", file=sys.stderr)
+        return 65
+    print(token)
+    return 0
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        print(
+            "Dieses Hilfsprogramm muss über PolicyKit gestartet werden.",
+            file=sys.stderr,
+        )
+        return 77
+    if len(sys.argv) == 4 and sys.argv[1] == "install-model":
+        return install_model(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 3 and sys.argv[1] in DOCUMENT_TARGETS:
+        return install_document(sys.argv[1], sys.argv[2])
+    if len(sys.argv) == 2 and sys.argv[1] == "read-viewer-token":
+        return read_viewer_token()
+    if len(sys.argv) != 4 or sys.argv[1] != "service":
+        print("Ungültige Aktion.", file=sys.stderr)
+        return 64
+    action, unit = sys.argv[2], sys.argv[3]
+    if action not in ALLOWED_ACTIONS or unit not in ALLOWED_UNITS:
+        print("Aktion oder Dienst ist nicht freigegeben.", file=sys.stderr)
+        return 77
+    command = ["/usr/bin/systemctl"]
+    if action == "start" and unit == "personenzaehler.service":
+        command.extend(
+            [
+                "enable",
+                "--now",
+                "personenzaehler.service",
+                "personenzaehler-api.service",
+            ]
+        )
+    elif action == "stop" and unit == "personenzaehler.service":
+        command.extend(["stop", "personenzaehler-api.service", unit])
+    elif action == "restart" and unit == "personenzaehler.service":
+        command.extend(["restart", unit, "personenzaehler-api.service"])
+    else:
+        command.extend([action, unit])
+    result = subprocess.run(
+        command,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        timeout=30,
+    )
+    return result.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

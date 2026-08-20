@@ -10,6 +10,7 @@ __pycache__/
 !.env.example
 *.key
 *.pem
+!config/license_public_key.pem
 id_ed25519
 .codex_backups/
 artifacts/**/*.log
@@ -23,6 +24,8 @@ data/*.db*
 data/*.sqlite*
 config/api.env
 config/config.local.yaml
+config/license.json
+config/license_private_key.pem
 logs/*
 !logs/.gitkeep
 output/

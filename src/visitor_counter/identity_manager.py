@@ -31,6 +31,15 @@ class _GlobalProfile:
 
 
 class GlobalIdentityManager:
+    """Assign temporary cross-camera person IDs.
+
+    Normal handoffs use the short `match_window_seconds`. A profile may remain in
+    RAM for `cache_ttl_seconds` so a later observation can retain its temporary
+    ID, but a long-gap match requires a substantially stronger OSNet similarity.
+    This keeps the requested temporary ID lifetime without allowing time/box
+    geometry alone to reconnect old identities.
+    """
+
     def __init__(self, config: IdentityConfig) -> None:
         self.config = config
         self._next_global_id = 1
@@ -44,14 +53,7 @@ class GlobalIdentityManager:
         self._profiles.clear()
         self.stats = GlobalIdentityStats()
 
-    def update(
-        self,
-        camera_id: str,
-        tracks: list[TrackedObject],
-        timestamp: float,
-        frame_width: int,
-        frame_height: int,
-    ) -> list[TrackedObject]:
+    def update(self, camera_id: str, tracks: list[TrackedObject], timestamp: float, frame_width: int, frame_height: int) -> list[TrackedObject]:
         self._expire(timestamp)
         visible_global_ids: set[int] = set()
         assigned: list[TrackedObject] = []
@@ -89,42 +91,60 @@ class GlobalIdentityManager:
         self._next_global_id += 1
         return value
 
-    def _match_existing(
-        self,
-        camera_id: str,
-        track: TrackedObject,
-        timestamp: float,
-        frame_width: int,
-        frame_height: int,
-    ) -> int | None:
+    def _match_existing(self, camera_id: str, track: TrackedObject, timestamp: float, frame_width: int, frame_height: int) -> int | None:
         candidate = self._profile(0, camera_id, track, timestamp, frame_width, frame_height)
         best_id: int | None = None
         best_score = -1.0
+        best_age = 0.0
+        best_reid = -1.0
+
         for global_id, profile in self._profiles.items():
             if profile.camera_id == camera_id:
                 continue
             age = timestamp - profile.last_seen
-            if age < 0 or age > self.config.match_window_seconds:
+            if age < 0 or age > self.config.cache_ttl_seconds:
                 continue
-            score = self._score(profile, candidate, age)
+
+            # The two production cameras represent different passage stages.
+            # Two new observations at essentially the exact same instant are
+            # therefore not merged solely because they look alike. This is a
+            # useful guard against two similarly dressed people side by side.
+            if age < 0.10:
+                continue
+
+            reid_score = self._embedding_similarity(profile.embedding, candidate.embedding)
+            if age <= self.config.match_window_seconds:
+                score = self._score(profile, candidate, age)
+            else:
+                # Old profiles may only be reconnected by very strong ReID.
+                # Geometry/time cannot create a long-gap match on their own.
+                if reid_score < self._long_gap_reid_threshold():
+                    continue
+                shape_score = self._shape_score(profile, candidate)
+                score = (reid_score * 0.85) + (shape_score * 0.15)
+
             if score > best_score:
                 best_id = global_id
                 best_score = score
-        if best_id is not None and best_score >= self.config.reid_threshold:
+                best_age = age
+                best_reid = reid_score
+
+        if best_id is None:
+            return None
+        if best_age <= self.config.match_window_seconds:
+            if best_score >= self.config.reid_threshold:
+                return best_id
+            if best_score >= self.config.reid_threshold * 0.85:
+                self.stats.uncertain_matches += 1
+            return None
+
+        # Long-gap candidates have already passed the stronger embedding gate.
+        if best_reid >= self._long_gap_reid_threshold() and best_score >= self.config.reid_threshold:
             return best_id
-        if best_id is not None and best_score >= self.config.reid_threshold * 0.75:
-            self.stats.uncertain_matches += 1
+        self.stats.uncertain_matches += 1
         return None
 
-    def _profile(
-        self,
-        global_id: int,
-        camera_id: str,
-        track: TrackedObject,
-        timestamp: float,
-        frame_width: int,
-        frame_height: int,
-    ) -> _GlobalProfile:
+    def _profile(self, global_id: int, camera_id: str, track: TrackedObject, timestamp: float, frame_width: int, frame_height: int) -> _GlobalProfile:
         box = track.bbox
         cx, cy = box.center
         normalized_area = box.area / max(float(frame_width * frame_height), 1.0)
@@ -152,21 +172,35 @@ class GlobalIdentityManager:
         age_score = max(0.0, 1.0 - (age / max(self.config.match_window_seconds, 0.001)))
         shape_score = max(0.0, 1.0 - ((area_delta * 0.65) + (aspect_delta * 0.35)))
         position_score = max(0.0, 1.0 - position_distance)
-        base_score = (shape_score * 0.45) + (position_score * 0.20) + (age_score * 0.20)
-        if first.embedding is None or second.embedding is None:
-            return base_score + (shape_score * 0.15)
-        reid_score = max(0.0, min(1.0, _cosine_similarity(first.embedding, second.embedding)))
-        return base_score + (reid_score * 0.15)
+
+        reid_score = self._embedding_similarity(first.embedding, second.embedding)
+        if reid_score < 0:
+            fallback = (age_score * 0.50) + (shape_score * 0.35) + (position_score * 0.15)
+            return min(fallback, self.config.reid_threshold * 0.80)
+        return (reid_score * 0.60) + (age_score * 0.20) + (shape_score * 0.15) + (position_score * 0.05)
+
+    @staticmethod
+    def _shape_score(first: _GlobalProfile, second: _GlobalProfile) -> float:
+        area_delta = abs(first.normalized_area - second.normalized_area) / max(first.normalized_area, second.normalized_area, 0.001)
+        aspect_delta = abs(first.aspect_ratio - second.aspect_ratio) / max(first.aspect_ratio, second.aspect_ratio, 0.001)
+        return max(0.0, 1.0 - ((area_delta * 0.65) + (aspect_delta * 0.35)))
+
+    @staticmethod
+    def _embedding_similarity(first: tuple[float, ...] | None, second: tuple[float, ...] | None) -> float:
+        if first is None or second is None:
+            return -1.0
+        return max(0.0, min(1.0, _cosine_similarity(first, second)))
+
+    def _long_gap_reid_threshold(self) -> float:
+        return min(0.98, max(0.90, self.config.reid_threshold + 0.20))
 
     def _visible_ids(self, timestamp: float) -> set[int]:
-        return {
-            global_id
-            for global_id, profile in self._profiles.items()
-            if timestamp - profile.last_seen <= self.config.stale_seconds
-        }
+        return {global_id for global_id, profile in self._profiles.items() if timestamp - profile.last_seen <= self.config.stale_seconds}
 
     def _expire(self, timestamp: float) -> None:
-        max_age = min(max(self.config.match_window_seconds, self.config.stale_seconds) * 3.0, self.config.cache_ttl_seconds)
+        # cache_ttl_seconds is the explicit lifetime of temporary person profiles.
+        # stale_seconds only controls whether an ID counts as currently visible.
+        max_age = max(self.config.cache_ttl_seconds, self.config.stale_seconds)
         stale_ids = [global_id for global_id, profile in self._profiles.items() if timestamp - profile.last_seen > max_age]
         for global_id in stale_ids:
             del self._profiles[global_id]

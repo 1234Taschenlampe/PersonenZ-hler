@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+export PYTHONPATH=/usr/lib/personenzaehler/src
+set -a
+if [ -r /etc/personenzaehler/api.env ]; then . /etc/personenzaehler/api.env; fi
+set +a
+export PERSONENZAEHLER_DATA_DIR=/var/lib/personenzaehler
+exec /usr/bin/python3 /usr/lib/personenzaehler/scripts/status_api.py --project-root /usr/lib/personenzaehler --config /etc/personenzaehler/config.yaml

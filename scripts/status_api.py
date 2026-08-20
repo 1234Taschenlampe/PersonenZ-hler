@@ -10,9 +10,9 @@ import select
 import shutil
 import socket
 import ssl
+import struct
 import subprocess
 import sys
-import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,7 +42,10 @@ ROLE_LEVEL = {"anonymous": 0, "viewer": 1, "operator": 2, "admin": 3}
 
 def _read_live_status(project_root: Path) -> dict | None:
     try:
-        live_status_path = project_root / "data" / "live_status.json"
+        data_dir = Path(
+            os.environ.get("PERSONENZAEHLER_DATA_DIR", str(project_root / "data"))
+        )
+        live_status_path = data_dir / "live_status.json"
         if not live_status_path.exists():
             return None
         data = json.loads(live_status_path.read_text(encoding="utf-8"))
@@ -55,14 +58,23 @@ def _read_live_status(project_root: Path) -> dict | None:
 
 
 def build_status(project_root: Path) -> dict:
-    config = load_config(project_root / "config" / "config.yaml")
+    config_path = Path(
+        os.environ.get(
+            "PERSONENZAEHLER_CONFIG_FILE", str(project_root / "config" / "config.yaml")
+        )
+    )
+    config = load_config(config_path)
     detector = ModelManager(config.model, project_root).status()
     reid = OSNetReIDManager(config.model, project_root).status(validate_hailo=False)
     db_path = project_root / config.database.path
     live = _read_live_status(project_root)
     if live:
         counts = live.get("counts", _counts_status(project_root, config))
-        cameras = [_sanitized_camera_status(item) for item in live.get("cameras", []) if isinstance(item, dict)]
+        cameras = [
+            _sanitized_camera_status(item)
+            for item in live.get("cameras", [])
+            if isinstance(item, dict)
+        ]
         runtime = dict(live.get("runtime", {}))
         if runtime.get("active_hef"):
             runtime["active_hef"] = Path(str(runtime["active_hef"])).name
@@ -124,7 +136,8 @@ def build_status(project_root: Path) -> dict:
             "target_exists": detector.target_exists,
             "message": _redact_project_path(detector.message, project_root),
             "error": _redact_project_path(detector.error_message, project_root),
-            "fallback_enabled": config.model.allow_fallback or config.model.detector_fallback_enabled,
+            "fallback_enabled": config.model.allow_fallback
+            or config.model.detector_fallback_enabled,
             "class_filter": {"0": "person"},
         },
         "reid": {
@@ -140,7 +153,9 @@ def build_status(project_root: Path) -> dict:
             "ram_percent": psutil.virtual_memory().percent,
             "swap_percent": psutil.swap_memory().percent,
             "disk_free_bytes": shutil.disk_usage(project_root).free,
-            "load_average": list(psutil.getloadavg()) if hasattr(psutil, "getloadavg") else [],
+            "load_average": list(psutil.getloadavg())
+            if hasattr(psutil, "getloadavg")
+            else [],
             "temperature_c": read_pi_temperature_c(),
             "system_uptime_seconds": _system_uptime_seconds(),
         },
@@ -162,12 +177,29 @@ def cached_status(project_root: Path, max_age_seconds: float = 0.75) -> dict:
 
 def _sanitized_camera_status(item: dict) -> dict:
     allowed = {
-        "camera_id", "name", "role", "source", "wanted_fps", "width", "height", "status",
-        "actual_fps", "last_frame_time", "seconds_since_last_frame", "connected_seconds",
-        "reconnect_count", "dropped_frames", "decode_errors", "visible", "entered", "exited",
+        "camera_id",
+        "name",
+        "role",
+        "source",
+        "wanted_fps",
+        "width",
+        "height",
+        "status",
+        "actual_fps",
+        "last_frame_time",
+        "seconds_since_last_frame",
+        "connected_seconds",
+        "reconnect_count",
+        "dropped_frames",
+        "decode_errors",
+        "visible",
+        "entered",
+        "exited",
     }
     result = {key: value for key, value in item.items() if key in allowed}
-    result["last_error"] = None if item.get("status") == "ONLINE" else "camera unavailable"
+    result["last_error"] = (
+        None if item.get("status") == "ONLINE" else "camera unavailable"
+    )
     return result
 
 
@@ -253,6 +285,9 @@ def _counts_status(project_root: Path, config: AppConfig) -> dict:
             "visible": None,
             "suppressed": None,
             "uncertain": None,
+            "daily_unique": None,
+            "throughput": None,
+            "wrong_way": None,
             "last_event_time": None,
         }
     db = _open_configured_database(project_root, config)
@@ -268,6 +303,9 @@ def _counts_status(project_root: Path, config: AppConfig) -> dict:
             "visible": None,
             "suppressed": counts.get("suppressed"),
             "uncertain": counts.get("uncertain"),
+            "daily_unique": counts.get("daily_unique"),
+            "throughput": (counts.get("entered") or 0) + (counts.get("exited") or 0),
+            "wrong_way": counts.get("wrong_way"),
             "last_event_time": None if not last_event else last_event[0],
         }
     finally:
@@ -355,7 +393,9 @@ class StatusHandler(BaseHTTPRequestHandler):
             return
         if route == "/api/v1/video" or route.startswith("/api/v1/video/"):
             if not self.app_config.privacy.video_stream_enabled:
-                self._send_json(404, {"error": "video stream disabled by privacy configuration"})
+                self._send_json(
+                    404, {"error": "video stream disabled by privacy configuration"}
+                )
                 return
             if route == "/api/v1/video":
                 self._send_json(200, {"streams": _available_streams()})
@@ -374,14 +414,30 @@ class StatusHandler(BaseHTTPRequestHandler):
             return
         if route == "/api/v1/telemetry/current":
             status = cached_status(self.project_root)
-            self._send_json(200, {"timestamp": status["timestamp"], "host": status["host"], "hailo": status["hailo"], "database": status["database"]})
+            self._send_json(
+                200,
+                {
+                    "timestamp": status["timestamp"],
+                    "host": status["host"],
+                    "hailo": status["hailo"],
+                    "database": status["database"],
+                },
+            )
             return
         if route == "/api/v1/cameras":
-            self._send_json(200, {"cameras": cached_status(self.project_root)["cameras"]})
+            self._send_json(
+                200, {"cameras": cached_status(self.project_root)["cameras"]}
+            )
             return
         if route == "/api/v1/runtime":
             status = cached_status(self.project_root)
-            self._send_json(200, {"runtime": status.get("runtime", {}), "live_data_available": status.get("live_data_available", False)})
+            self._send_json(
+                200,
+                {
+                    "runtime": status.get("runtime", {}),
+                    "live_data_available": status.get("live_data_available", False),
+                },
+            )
             return
         if route == "/api/v1/events":
             try:
@@ -389,20 +445,30 @@ class StatusHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._send_json(400, {"error": "invalid limit"})
                 return
-            self._send_json(200, {"events": _events(self.project_root, max(1, min(limit, 200)))})
+            self._send_json(
+                200,
+                {
+                    "events": _events(
+                        self.project_root, self.app_config, max(1, min(limit, 200))
+                    )
+                },
+            )
             return
         if route == "/metrics":
             status = cached_status(self.project_root)
-            body = "\n".join(
-                [
-                    f"visitor_counter_hailo_device_detected {1 if status['hailo']['device_detected'] else 0}",
-                    f"visitor_counter_detector_hef_exists {1 if status['detector']['hef_exists'] else 0}",
-                    f"visitor_counter_reid_ready {1 if status['reid']['ready'] else 0}",
-                    f"visitor_counter_host_cpu_percent {status['host']['cpu_percent']}",
-                    f"visitor_counter_host_ram_percent {status['host']['ram_percent']}",
-                    f"visitor_counter_database_size_bytes {status['database']['size_bytes']}",
-                ]
-            ) + "\n"
+            body = (
+                "\n".join(
+                    [
+                        f"visitor_counter_hailo_device_detected {1 if status['hailo']['device_detected'] else 0}",
+                        f"visitor_counter_detector_hef_exists {1 if status['detector']['hef_exists'] else 0}",
+                        f"visitor_counter_reid_ready {1 if status['reid']['ready'] else 0}",
+                        f"visitor_counter_host_cpu_percent {status['host']['cpu_percent']}",
+                        f"visitor_counter_host_ram_percent {status['host']['ram_percent']}",
+                        f"visitor_counter_database_size_bytes {status['database']['size_bytes']}",
+                    ]
+                )
+                + "\n"
+            )
             self._send_bytes(200, body.encode("utf-8"), "text/plain; version=0.0.4")
             return
         self._send_json(404, {"error": "not found"})
@@ -427,7 +493,14 @@ class StatusHandler(BaseHTTPRequestHandler):
                 export = db.export_personal_data(int(payload.get("limit", 1000)))
             finally:
                 db.close()
-            self._audit("privacy_export", "success", role, route, 200, records=len(export["events"]))
+            self._audit(
+                "privacy_export",
+                "success",
+                role,
+                route,
+                200,
+                records=len(export["events"]),
+            )
             self._send_json(200, export)
             return
         if route == "/api/v1/privacy/delete":
@@ -436,13 +509,23 @@ class StatusHandler(BaseHTTPRequestHandler):
                 return
             db = self._open_database()
             try:
-                deleted = db.delete_personal_data(reset_aggregates=bool(payload.get("reset_aggregates", False)))
+                deleted = db.delete_personal_data(
+                    reset_aggregates=bool(payload.get("reset_aggregates", False))
+                )
             finally:
                 db.close()
             shutil.rmtree(stream_frame_directory(self.project_root), ignore_errors=True)
             records = sum(deleted.values())
             self._audit("privacy_delete", "success", role, route, 200, records=records)
-            self._send_json(200, {"deleted": deleted, "aggregate_counts_reset": bool(payload.get("reset_aggregates", False))})
+            self._send_json(
+                200,
+                {
+                    "deleted": deleted,
+                    "aggregate_counts_reset": bool(
+                        payload.get("reset_aggregates", False)
+                    ),
+                },
+            )
             return
         self._send_json(404, {"error": "not found"})
 
@@ -465,7 +548,12 @@ class StatusHandler(BaseHTTPRequestHandler):
         return self.server_version
 
     def _required_role(self, route: str) -> str:
-        if route.startswith("/api/v1/video/") or route in {"/api/v1/video", "/api/v1/events", "/api/v1/telemetry/current", "/metrics"}:
+        if route.startswith("/api/v1/video/") or route in {
+            "/api/v1/video",
+            "/api/v1/events",
+            "/api/v1/telemetry/current",
+            "/metrics",
+        }:
             return "operator"
         return "viewer"
 
@@ -478,7 +566,11 @@ class StatusHandler(BaseHTTPRequestHandler):
             return None
         supplied = value.removeprefix("Bearer ").strip()
         role = next(
-            (candidate for candidate in ("admin", "operator", "viewer") if hmac.compare_digest(supplied, self.tokens.get(candidate, "\0"))),
+            (
+                candidate
+                for candidate in ("admin", "operator", "viewer")
+                if hmac.compare_digest(supplied, self.tokens.get(candidate, "\0"))
+            ),
             None,
         )
         if role is None or ROLE_LEVEL[role] < ROLE_LEVEL[required_role]:
@@ -488,8 +580,14 @@ class StatusHandler(BaseHTTPRequestHandler):
 
     def _send_auth_error(self, forbidden: bool = False) -> None:
         code = 403 if forbidden else 401
-        body = {"error": "insufficient role" if forbidden else "authentication required"}
-        self._send_json(code, body, extra_headers={"WWW-Authenticate": 'Bearer realm="visitor-counter"'})
+        body = {
+            "error": "insufficient role" if forbidden else "authentication required"
+        }
+        self._send_json(
+            code,
+            body,
+            extra_headers={"WWW-Authenticate": 'Bearer realm="visitor-counter"'},
+        )
 
     def _rate_limit_ok(self) -> bool:
         bucket = int(time() // 60)
@@ -501,7 +599,11 @@ class StatusHandler(BaseHTTPRequestHandler):
             count += 1
             _RATE_LIMITS[key] = (current_bucket, count)
             if len(_RATE_LIMITS) > 1024:
-                for item in [item for item, value in _RATE_LIMITS.items() if value[0] < bucket - 1]:
+                for item in [
+                    item
+                    for item, value in _RATE_LIMITS.items()
+                    if value[0] < bucket - 1
+                ]:
                     _RATE_LIMITS.pop(item, None)
             return count <= self.app_config.api.max_requests_per_minute
 
@@ -553,7 +655,9 @@ class StatusHandler(BaseHTTPRequestHandler):
         interval = 1.0 / fps
         boundary = "personenzaehler-frame"
         self.send_response(200)
-        self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+        self.send_header(
+            "Content-Type", f"multipart/x-mixed-replace; boundary={boundary}"
+        )
         self._send_security_headers()
         self.send_header("Connection", "close")
         self.end_headers()
@@ -572,10 +676,23 @@ class StatusHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
 
-    def _send_json(self, code: int, payload: dict, extra_headers: dict[str, str] | None = None) -> None:
-        self._send_bytes(code, json.dumps(payload, sort_keys=True).encode("utf-8"), "application/json", extra_headers)
+    def _send_json(
+        self, code: int, payload: dict, extra_headers: dict[str, str] | None = None
+    ) -> None:
+        self._send_bytes(
+            code,
+            json.dumps(payload, sort_keys=True).encode("utf-8"),
+            "application/json",
+            extra_headers,
+        )
 
-    def _send_bytes(self, code: int, body: bytes, content_type: str, extra_headers: dict[str, str] | None = None) -> None:
+    def _send_bytes(
+        self,
+        code: int,
+        body: bytes,
+        content_type: str,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -591,8 +708,12 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header(
+            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+        )
+        self.send_header(
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+        )
         if self.tls_enabled:
             self.send_header("Strict-Transport-Security", "max-age=31536000")
         origin = self.headers.get("Origin", "")
@@ -608,7 +729,11 @@ class StatusHandler(BaseHTTPRequestHandler):
         if not key:
             self._send_json(400, {"error": "missing websocket key"})
             return
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()).decode("ascii")
+        accept = base64.b64encode(
+            hashlib.sha1(
+                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")
+            ).digest()
+        ).decode("ascii")
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
@@ -620,10 +745,24 @@ class StatusHandler(BaseHTTPRequestHandler):
             try:
                 if _client_closed(self.connection):
                     break
-                self.wfile.write(_websocket_text_frame(json.dumps(cached_status(self.project_root), separators=(",", ":"), sort_keys=True)))
+                self.wfile.write(
+                    _websocket_text_frame(
+                        json.dumps(
+                            cached_status(self.project_root),
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                    )
+                )
                 self.wfile.flush()
                 sleep(1.0)
-            except (BrokenPipeError, ConnectionResetError, TimeoutError, socket.timeout, OSError):
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                TimeoutError,
+                socket.timeout,
+                OSError,
+            ):
                 break
 
     def _read_json_body(self) -> dict:
@@ -646,13 +785,26 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _open_database(self) -> EventDatabase:
         return _open_configured_database(self.project_root, self.app_config)
 
-    def _audit(self, action: str, outcome: str, role: str, route: str, status: int, **details: int) -> None:
+    def _audit(
+        self,
+        action: str,
+        outcome: str,
+        role: str,
+        route: str,
+        status: int,
+        **details: int,
+    ) -> None:
         write_audit_event(
             self.project_root / "logs",
             action=action,
             outcome=outcome,
             role=role,
-            details={"method": self.command, "route": route, "status": status, **details},
+            details={
+                "method": self.command,
+                "route": route,
+                "status": status,
+                **details,
+            },
         )
 
 
@@ -681,8 +833,7 @@ def _client_closed(connection: socket.socket) -> bool:
     return data == b""
 
 
-def _events(project_root: Path, limit: int) -> list[dict]:
-    config = load_config(project_root / "config" / "config.yaml")
+def _events(project_root: Path, config: AppConfig, limit: int) -> list[dict]:
     path = project_root / config.database.path
     if not path.exists():
         return []
@@ -708,15 +859,20 @@ def _events(project_root: Path, limit: int) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Privacy-preserving visitor-counter API.")
+    parser = argparse.ArgumentParser(
+        description="Privacy-preserving visitor-counter API."
+    )
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
+    parser.add_argument("--config", type=Path)
     parser.add_argument("--host")
     parser.add_argument("--port", type=int)
     parser.add_argument("--tls-cert", type=Path)
     parser.add_argument("--tls-key", type=Path)
     args = parser.parse_args()
     project_root = args.project_root.resolve()
-    config = load_config(project_root / "config" / "config.yaml")
+    config_path = (args.config or project_root / "config" / "config.yaml").resolve()
+    os.environ["PERSONENZAEHLER_CONFIG_FILE"] = str(config_path)
+    config = load_config(config_path)
     api = config.api
     if not api.enabled:
         raise SystemExit("API is disabled in config/config.yaml")
@@ -726,7 +882,9 @@ def main() -> int:
     tls_key = args.tls_key or _configured_path(project_root, api.tls_private_key)
     loopback = host in {"127.0.0.1", "::1", "localhost"}
     if not loopback and (not api.require_auth or not tls_cert or not tls_key):
-        raise SystemExit("Non-loopback binding requires authentication plus a TLS certificate and private key.")
+        raise SystemExit(
+            "Non-loopback binding requires authentication plus a TLS certificate and private key."
+        )
 
     tokens: dict[str, str] = {}
     if api.require_auth:
@@ -737,7 +895,9 @@ def main() -> int:
         }.items():
             token = os.environ.get(variable, "")
             if len(token) < api.minimum_token_length:
-                raise SystemExit(f"Missing or too-short {role} token in environment variable {variable}.")
+                raise SystemExit(
+                    f"Missing or too-short {role} token in environment variable {variable}."
+                )
             tokens[role] = token
         if len(set(tokens.values())) != len(tokens):
             raise SystemExit("Viewer, operator, and admin tokens must be different.")

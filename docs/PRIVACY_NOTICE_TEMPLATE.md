@@ -13,16 +13,17 @@
 
 **In diesem Bereich wird eine lokale, kamerabasierte Personenzählung eingesetzt.**
 
-Die Kamerabilder werden zur automatisierten Erkennung von Personen verarbeitet, um Ein- und Austritte bzw. die Auslastung eines Bereichs zu zählen.
+Die Kamerabilder werden zur automatisierten Erkennung von Personen verarbeitet, um Ein- und Austritte, die aktuelle Belegung und – sofern aktiviert – die Anzahl eindeutiger Besucher eines Kalendertages zu bestimmen.
 
 | Information | Angabe |
 | --- | --- |
 | **Verantwortlicher** | `[Name/Firma/Organisation]` |
 | **Anschrift** | `[Anschrift]` |
 | **Kontakt** | `[E-Mail / Telefon]` |
-| **Zweck der Verarbeitung** | `[z. B. Ermittlung der aktuellen Auslastung / Besucherzählung]` |
+| **Zweck der Verarbeitung** | `[z. B. aktuelle Belegung, Besucherzählung und eindeutige Tagesbesucher]` |
 | **Rechtsgrundlage** | `[Ergebnis der dokumentierten rechtlichen Prüfung]` |
 | **Berechtigtes Interesse, falls zutreffend** | `[konkret beschreiben]` |
+| **Re-ID / Wiedererkennung am selben Tag** | `[aktiviert / deaktiviert]` |
 | **Speicherung von Videos/Einzelbildern** | `Standardmäßig: keine dauerhafte Speicherung` |
 | **Granulare Ereignisspeicherung** | `[deaktiviert / aktiviert mit Speicherdauer: ___ Stunden]` |
 | **Weitere Datenschutzinformationen** | `[URL eintragen]` |
@@ -41,9 +42,11 @@ Die Kamerabilder werden zur automatisierten Erkennung von Personen verarbeitet, 
 
 Das System verarbeitet Kamerabilder kurzfristig im Arbeitsspeicher, um Personen mittels Computer-Vision-Modell zu erkennen und Zählvorgänge abzuleiten. Im datenschutzfreundlichen Standardbetrieb werden keine Videoaufnahmen oder Einzelbilder dauerhaft gespeichert.
 
-Das System ist nicht für Gesichtserkennung oder die Identifizierung namentlich bestimmter Personen vorgesehen. Es werden standardmäßig keine Namen und keine dauerhaften biometrischen Gesichtsdaten gespeichert.
+Das System ist nicht für Gesichtserkennung oder die namentliche Identifizierung von Personen vorgesehen. Für einen aktivierten eindeutigen Tagesbesucherzähler kann jedoch ein lokales Person-Re-ID-Modell Merkmalsvektoren aus dem Erscheinungsbild einer Person erzeugen, um dieselbe Person bei einem späteren Eintritt am selben Kalendertag wiederzuerkennen. Diese Merkmalsvektoren sind vom Betreiber gesondert datenschutzrechtlich zu bewerten.
 
-Die Verarbeitung erfolgt im vorgesehenen Standardbetrieb lokal auf dem eingesetzten Raspberry-Pi-/Hailo-System. Eine Übertragung von Kamerabildern an einen Cloud-Dienst ist für die Laufzeitverarbeitung nicht vorgesehen.
+Bei aktivierter Tages-Re-ID werden die Profile nur für den aktiven lokalen Kalendertag verwendet. Ist ein lokaler Verschlüsselungsschlüssel eingerichtet, werden sie verschlüsselt gespeichert, damit ein Neustart nicht automatisch zu Doppelzählungen führt. Profile vergangener Tage werden gelöscht.
+
+Die Verarbeitung erfolgt lokal auf dem eingesetzten Raspberry-Pi-/Hailo-System. Eine Übertragung von Kamerabildern an einen Cloud-Dienst ist für die Laufzeitverarbeitung nicht vorgesehen.
 
 ---
 
@@ -68,7 +71,9 @@ Die Verarbeitung erfolgt im vorgesehenen Standardbetrieb lokal auf dem eingesetz
 
 Die kamerabasierte Verarbeitung erfolgt ausschließlich für folgenden Zweck:
 
-`[konkreten Zweck eintragen, z. B. Ermittlung der aktuellen Besucherzahl zur Auslastungssteuerung]`
+`[konkreten Zweck eintragen, z. B. Ermittlung der aktuellen Besucherzahl sowie – falls erforderlich und rechtlich geprüft – eindeutiger Tagesbesucher]`
+
+Falls die Wiedererkennung zur Ermittlung eindeutiger Tagesbesucher aktiviert ist, muss dieser Zweck ausdrücklich benannt werden. Er darf nicht stillschweigend unter einer allgemeinen Formulierung wie „anonyme Besucherzählung“ versteckt werden.
 
 Die gewonnenen Daten dürfen nicht ohne erneute rechtliche Prüfung für andere Zwecke, insbesondere nicht zur Leistungs- oder Verhaltenskontrolle einzelner Personen, verwendet werden.
 
@@ -76,7 +81,7 @@ Die gewonnenen Daten dürfen nicht ohne erneute rechtliche Prüfung für andere 
 
 ## 3. Rechtsgrundlage
 
-Die konkrete Rechtsgrundlage muss vor der Inbetriebnahme anhand des tatsächlichen Einsatzes bestimmt werden.
+Die konkrete Rechtsgrundlage muss vor der Inbetriebnahme anhand des tatsächlichen Einsatzes bestimmt werden. Für eine aktivierte Wiedererkennung ist eine gesonderte rechtliche Prüfung erforderlich.
 
 **Rechtsgrundlage:**  
 `[z. B. Art. 6 Abs. 1 lit. f DSGVO nach dokumentierter Interessenabwägung / andere Rechtsgrundlage]`
@@ -94,11 +99,12 @@ Je nach aktivierter Konfiguration können insbesondere folgende Daten verarbeite
 
 - kurzfristige Kameraframes für die lokale Personenerkennung,
 - erkannte Personenpositionen und technische Tracking-Informationen während der Verarbeitung,
-- aggregierte Zählwerte wie Eintritte, Austritte und aktuelle Belegung,
+- aggregierte Zählwerte wie Eintritte, Austritte, aktuelle Belegung und eindeutige Tagesbesucher,
 - technische Status- und Diagnosedaten,
+- bei aktivierter Tages-Re-ID normalisierte Merkmalsvektoren des Erscheinungsbilds für den Vergleich innerhalb desselben Kalendertages,
 - bei optional aktivierter Ereignisspeicherung zusätzlich pseudonymisierte Ereignisdaten wie Zeitpunkte, Richtung, technische IDs und Konfidenzwerte.
 
-Im vorgesehenen Standardbetrieb werden keine Namen und keine dauerhaften Gesichtsbilder gespeichert.
+Es werden keine Namen aus dem Kamerabild abgeleitet und keine dauerhaften Gesichtsbilder gespeichert.
 
 ---
 
@@ -111,7 +117,7 @@ Im vorgesehenen Standardbetrieb werden keine Namen und keine dauerhaften Gesicht
 `[keine / konkret angeben]`
 
 **Übermittlung in Drittländer außerhalb EU/EWR:**  
-`Im vorgesehenen lokalen Standardbetrieb: keine.`
+`Im vorgesehenen lokalen Betrieb: keine.`
 
 Falls der Betreiber zusätzliche Netzwerk-, Cloud-, Fernwartungs- oder Analysedienste einbindet, ist diese Angabe entsprechend anzupassen und die Zulässigkeit gesondert zu prüfen.
 
@@ -119,12 +125,13 @@ Falls der Betreiber zusätzliche Netzwerk-, Cloud-, Fernwartungs- oder Analysedi
 
 ## 6. Speicherdauer
 
-Im datenschutzfreundlichen Standardbetrieb:
+Im vorgesehenen lokalen Betrieb:
 
 - keine dauerhafte Speicherung von Videos oder Einzelbildern,
 - nur kurzfristige Verarbeitung von Kameraframes für die Inferenz,
 - Speicherung aggregierter Zählwerte,
-- granulare Personenereignisse standardmäßig deaktiviert.
+- granulare Personenereignisse standardmäßig deaktiviert,
+- bei aktivierter Tages-Re-ID: Re-ID-Profile nur bis zum lokalen Tageswechsel; anschließend Löschung.
 
 Falls granulare Ereignisse aktiviert werden:
 
@@ -136,13 +143,13 @@ Die Projektkonfiguration sieht für aktivierte Ereignisse eine kurze Aufbewahrun
 
 ## 7. Pflicht zur Bereitstellung der Daten
 
-`[Beschreiben, ob und in welcher Form betroffene Personen den überwachten Bereich vermeiden können. Bei öffentlich zugänglichen Bereichen entsprechend konkretisieren.]`
+`[Beschreiben, ob und in welcher Form betroffene Personen den erfassten Bereich vermeiden können. Bei öffentlich zugänglichen Bereichen entsprechend konkretisieren.]`
 
 ---
 
 ## 8. Automatisierte Entscheidungen
 
-Das System zählt Personen automatisiert. Es ist nicht dafür vorgesehen, Entscheidungen mit rechtlicher Wirkung oder vergleichbar erheblicher Beeinträchtigung über einzelne Personen zu treffen.
+Das System zählt Personen automatisiert und kann bei aktivierter Tages-Re-ID statistisch entscheiden, ob zwei beobachtete Erscheinungsbilder wahrscheinlich derselben Person zuzuordnen sind. Es ist nicht dafür vorgesehen, Entscheidungen mit rechtlicher Wirkung oder vergleichbar erheblicher Beeinträchtigung über einzelne Personen zu treffen.
 
 **Abweichender Einsatz:** `[falls zutreffend beschreiben]`
 
@@ -161,7 +168,7 @@ Betroffene Personen können – soweit die jeweiligen gesetzlichen Voraussetzung
 
 Anfragen können an den oben genannten Verantwortlichen gerichtet werden.
 
-Da das System im datenschutzfreundlichen Standardbetrieb keine unmittelbare Identifikation von Personen vorsieht, kann eine Zuordnung einzelner gespeicherter Zähl- oder Ereignisdaten zu einer bestimmten natürlichen Person technisch nicht oder nur eingeschränkt möglich sein.
+Da das System keine namentliche Zuordnung vorsieht, kann eine Zuordnung einzelner gespeicherter Zähl- oder Re-ID-Daten zu einer konkret benannten natürlichen Person technisch nicht oder nur eingeschränkt möglich sein. Dies hebt die datenschutzrechtliche Relevanz der vorgelagerten Verarbeitung nicht auf.
 
 ---
 
@@ -189,9 +196,9 @@ Technische Datenschutz- und Sicherheitsdokumentation des Projekts:
 2. Die erste Informationsebene gut sichtbar **vor** dem Erfassungsbereich anbringen.
 3. Die vollständige Information über URL/QR-Code leicht erreichbar bereitstellen.
 4. Kameras so ausrichten oder maskieren, dass nur der für den Zweck erforderliche Bereich erfasst wird.
-5. Rechtsgrundlage und ggf. Interessenabwägung dokumentieren.
+5. Rechtsgrundlage und ggf. Interessenabwägung dokumentieren; Tages-Re-ID separat bewerten.
 6. Prüfen, ob eine Datenschutz-Folgenabschätzung nach Art. 35 DSGVO erforderlich ist.
-7. Speicherdauer, Zugriffsrechte und Löschfunktion vor Inbetriebnahme testen.
+7. Speicherdauer, Zugriffsrechte, Tageswechsel und Löschfunktion vor Inbetriebnahme testen.
 8. Änderungen an Kamerawinkel, Zweck, Speicherumfang, Re-ID, Remotezugriff oder Ereignisspeicherung erneut datenschutzrechtlich bewerten.
 
 ### Maßgebliche Orientierung

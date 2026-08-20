@@ -1,0 +1,24 @@
+[Unit]
+Description=PersonenZähler local API
+After=personenzaehler.service
+Wants=personenzaehler.service
+
+[Service]
+Type=simple
+User=personenzaehler
+Group=personenzaehler
+EnvironmentFile=-/etc/personenzaehler/api.env
+ExecStart=/usr/bin/personenzaehler-api
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=personenzaehler
+LogsDirectory=personenzaehler
+ReadWritePaths=/var/lib/personenzaehler /var/log/personenzaehler
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

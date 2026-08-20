@@ -148,6 +148,13 @@ class CameraStats:
     dropped_frames: int = 0
     queue_replacements: int = 0
     last_error: str = ""
+    source: str = ""
+    transport: str = ""
+    state: str = "OFFLINE"
+    reconnect_count: int = 0
+    decode_errors: int = 0
+    last_frame_time: float | None = None
+    connected_since: float | None = None
 
 
 @dataclass(frozen=True)

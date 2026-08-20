@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+export PYTHONPATH=/usr/lib/personenzaehler/src
+exec /usr/bin/python3 -m visitor_counter.service --project-root /usr/lib/personenzaehler --system-layout "$@"

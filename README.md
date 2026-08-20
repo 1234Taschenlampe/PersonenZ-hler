@@ -1,167 +1,92 @@
-# YOLO26m Dual-Kamera Besucherzaehler
+# PersonenZähler Desktop Suite
 
-Native PySide6-Desktop-Anwendung fuer einen Raspberry Pi 5 mit Hailo-10H und zwei Kameras.
+PersonenZähler ist eine native Linux-Desktop-Anwendung für lokale, Hailo-beschleunigte Besucher- und Belegungszählung auf einem Raspberry Pi 5 mit aktuellem 64-Bit Raspberry Pi OS (Trixie). Die Produktionsarchitektur verwendet zwei konfigurierbare Kameraquellen, YOLO26m auf Hailo-10H, lokales Tracking, temporäre OSNet-Re-ID, kameraübergreifenden Consensus und eine lokale SQLite-Datenbank.
 
-Das Laufzeitsystem verwendet das YOLO26m COCO Detection HEF fuer Hailo-10H und filtert auf COCO-Klasse `person`. Es soll keine CPU-Inferenz, OpenCV-DNN, Dummy-Daten oder Pose-HEFs als Ersatz fuer die produktive Detektion verwenden.
+![Übersicht der nativen Desktop-Anwendung](docs/screenshots/overview.png)
 
-## Privacy & GDPR
+## Installation für Anwender
 
-Das Projekt ist auf **lokale Verarbeitung und datenschutzfreundliche Voreinstellungen** ausgelegt. Im sicheren Standardbetrieb werden Kamerabilder nur fuer die laufende Personenerkennung verarbeitet und nicht dauerhaft als Video oder Einzelbild gespeichert. Gesichtserkennung und die Speicherung dauerhafter biometrischer Gesichtsdaten sind nicht vorgesehen. Granulare Personenereignisse sind standardmaessig deaktiviert; aktiviert der Betreiber sie bewusst, verlangt das System einen externen Verschluesselungsschluessel und verwendet Pseudonymisierung sowie eine begrenzte Aufbewahrungsdauer.
+1. Das ARM64-Paket `personenzaehler_1.0.0_arm64.deb` aus dem GitHub-Actions-Artefakt laden.
+2. Die Datei im grafischen Paketinstaller von Raspberry Pi OS/Debian öffnen und **Installieren** wählen.
+3. **PersonenZähler** aus dem App-Menü starten.
+4. Den Einrichtungsassistenten abschließen.
 
-Weitere Schutzmechanismen umfassen standardmaessig deaktivierte Live-/Remote-Videostreams, lokale API-Bindung an `127.0.0.1`, rollenbasierte API-Tokens, kurze Datenaufbewahrung und technische Sperren vor dem Kamerastart, solange die erforderlichen Betreiberangaben nicht dokumentiert sind.
+Für Installation und normalen Betrieb sind keine Python-, Shell- oder `systemctl`-Befehle nötig. Das Paket installiert Desktop-Starter, Icon, MIME-Typ, PolicyKit-Helfer, Systemdienste, sichere Laufzeitverzeichnisse und automatisch erzeugte API-/Datenschlüssel. Details stehen in der [Installationsanleitung](docs/INSTALLATION.md).
 
-**Wichtig:** Diese technischen Massnahmen machen einen konkreten Einsatz nicht automatisch DSGVO-konform. Der Betreiber muss insbesondere Zweck, Rechtsgrundlage, Erfassungsbereich, Transparenzinformation, Speicherdauer, Zugriffsrechte und gegebenenfalls die Erforderlichkeit einer Datenschutz-Folgenabschaetzung fuer den jeweiligen Einsatz pruefen.
+HailoRT und die Firmware sind hardwarespezifische Herstellerkomponenten. Die Anwendung erkennt fehlende Komponenten und meldet **KI-Beschleuniger nicht bereit**; sie startet keinen versteckten CPU-, Dummy- oder Ersatzmodellpfad. Die beiden produktiven HEF-Dateien werden über **KI & Hardware** importiert.
 
-Dokumentation:
+## Funktionsumfang
 
-- [DSGVO-Dokumentation](docs/DSGVO_DOKUMENTATION.md)
-- [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md)
-- [Vorlage fuer den Datenschutz-Hinweis am Kamerabereich](docs/PRIVACY_NOTICE_TEMPLATE.md)
+- moderne native PySide6-Oberfläche mit Sidebar, Cards, Light/Dark Mode und Hintergrund-Workern
+- First-Run-Assistent für System, Hailo, Modelle, Kameras, Datenschutz, API und Lizenz
+- getrennte Zähler für aktuelle Belegung, eindeutige Tagesbesucher, Eintritte, Austritte und Gesamtdurchfluss
+- Doppelzählungsunterdrückung, unsichere Entscheidungen und konfigurierbare Fehlrichtungsereignisse
+- USB/V4L2- sowie RTSP/RTSPS/HTTP(S)-Kameras mit Rollen und Richtungskonfiguration
+- lokaler Produktionsdienst und versionierte REST-/WebSocket-API
+- Android-Monitoring einschließlich Status, Events, Video-Endpunkte und additive Zählerfelder
+- grafische Serviceverwaltung, Logs, Hardwareprüfung, Modell-/Lizenz-/TLS-Import und redigierter Diagnoseexport
+- signierte Ed25519-Lizenzen; der private Herausgeberschlüssel ist nicht Bestandteil des Repositorys oder Pakets
+- datenschutzfreundliche Voreinstellungen: lokale Verarbeitung, keine Aufzeichnung, keine Gesichtserkennung, granulare Ereignisse aus
 
-## Hardware
+## Zählmodell
 
-- Raspberry Pi 5 mit 64-bit Raspberry Pi OS oder kompatiblem Debian
-- Hailo-10H
-- Zwei V4L2-kompatible USB-Kameras
-- Empfohlen: stabile Kamera-Pfade unter `/dev/v4l/by-path/` oder `/dev/v4l/by-id/`
+- **Aktuell im Gebäude:** ändert sich nur durch bestätigte Linienübertritte, nicht durch sichtbare Bounding Boxes.
+- **Besucher heute:** zählt temporäre Re-ID-Profile pro lokalem Kalendertag einmal. Profile werden beim Tageswechsel gelöscht; persistierte Profile sind verschlüsselt.
+- **Eintritte/Austritte:** persistente, getrennte Passagezähler.
+- **Gesamtdurchfluss:** Eintritte plus Austritte, einschließlich späterer Wiederkehr derselben Person.
+- **Fehlrichtungen:** ansonsten valide, aber nicht als Ein-/Austritt konfigurierte Übergänge; sie verändern die Belegung nicht.
 
-## Installation
+Re-ID erzeugt keine reale Identität, keinen Namen und keine Gesichtserkennung. Ohne verfügbaren Datenschutzschlüssel bleibt der Tageszähler im RAM und wird transparent als eingeschränkt neustartfest markiert.
 
-```bash
-git clone <repo> Ki-kammera-pi
-cd Ki-kammera-pi
-./scripts/install.sh
-./scripts/check_hardware.sh
-```
+## Bedienung
 
-## HailoRT pruefen
+Die neun Bereiche der Anwendung sind **Übersicht**, **Kameras**, **Ereignisse**, **Verlauf**, **KI & Hardware**, **System**, **Datenschutz**, **Einstellungen** und **Über**. Administrative Aktionen werden eng begrenzt über PolicyKit bestätigt; die GUI selbst läuft nie als Root. Das [Benutzerhandbuch](docs/USER_MANUAL.md) beschreibt Einrichtung, Android-Pairing, Diagnose und Fehlerbilder.
 
-```bash
-hailortcli --version
-hailortcli fw-control identify
-```
+## Datenschutz und Sicherheit
 
-Wenn diese Befehle fehlen oder kein Geraet melden, startet die App, aber Hailo-Inferenz bleibt sichtbar nicht bereit.
+PersonenZähler stellt technische Privacy-by-Design-Maßnahmen bereit. Das bedeutet nicht, dass jeder konkrete Kameraeinsatz automatisch DSGVO-konform ist. Der Betreiber muss insbesondere Zweck, Rechtsgrundlage, Transparenzinformation, Erfassungsbereich, Speicherdauer, Zugriffsrechte und eine mögliche DSFA/DPIA für seinen Einsatz bewerten.
 
-## Kameraerkennung
+- keine permanente Video- oder Bildspeicherung im Standardbetrieb
+- keine Gesichtserkennung, Namen oder dauerhafte biometrische Identitätsdatenbank
+- lokale Hailo-Verarbeitung und externe Telemetrie gesperrt
+- Remote-Livebild standardmäßig aus; Netzwerk-API außerhalb Loopback nur mit Authentifizierung und TLS
+- rollenbasierte Zufallstokens, redigierte Logs/Diagnose und kurze Retention
+- optionale granulare Ereignisse nur verschlüsselt
+- tägliche Löschung temporärer Re-ID-Profile
 
-```bash
-v4l2-ctl --list-devices
-ls -l /dev/v4l/by-path/
-ls -l /dev/video*
-```
+Siehe [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md), [DSGVO-Dokumentation](docs/DSGVO_DOKUMENTATION.md) und [technisches Security Review](docs/SECURITY_REVIEW.md).
 
-Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen. Metadaten-Nodes wie `/dev/video1` oder `/dev/video3` werden nicht als Bildquellen verwendet, wenn sie keine Frames liefern.
+## Architektur und Feature-Erhalt
 
-## Programmstart
+Die Desktop-GUI ist von Produktionsdienst und Inferenz getrennt. Application/Core, Kamera, Inferenz, Tracking/Re-ID, Counter, Datenbank, API, Privacy/Security, Diagnose, Serviceverwaltung und Packaging besitzen klar abgegrenzte Module. Die vollständige Historie wurde geprüft; wiederhergestellte V2-, WLAN-/Re-ID-, Lizenz-, API-, Android- und Tageszählerfunktionen bleiben mit ihrer Git-Ancestry erhalten.
 
-Vor dem ersten Kamerastart muessen Rechtsgrundlage, Zweck, Verantwortlicher, Kontakt und der sichtbar angebrachte Datenschutzhinweis in `config/config.yaml` dokumentiert werden. Ohne diese Freigabe startet die Kameraverarbeitung nicht. Details: [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
+- [Aktuelle Architektur](docs/ARCHITECTURE.md)
+- [Historien- und Feature-Audit](docs/FEATURE_HISTORY_AUDIT.md)
+- [V2-Architektur](docs/ARCHITECTURE_V2.md)
+- [Android-App](docs/ANDROID_APP.md)
+- [Lizenzsystem](docs/LICENSE_SYSTEM.md)
 
-```bash
-./scripts/start.sh
-```
+## Entwicklerinstallation
 
-Alternativ:
-
-```bash
-PYTHONPATH=src python3 -m visitor_counter.app --project-root "$PWD"
-```
-
-## Desktop-Icon
-
-Auf dem Raspberry Pi:
-
-```bash
-./scripts/install_desktop_icon.sh
-```
-
-Das erstellt:
-
-```text
-~/Desktop/Personenzaehler.desktop
-~/.local/share/applications/personenzaehler.desktop
-```
-
-Der Launcher verwendet `scripts/start_gui.sh`, startet den vorhandenen `visitor-counter.service` bei Bedarf und verhindert doppelte GUI-Starts.
-
-## GUI-Bedienung
-
-Die Anwendung zeigt standardmaessig keine Livebilder. Die Kameraflaechen bleiben im Datenschutzmodus verdeckt; Zaehler, Modellstatus, Kameraauswahl und Diagnosewerte bleiben sichtbar. Eine Vorschau muss bewusst aktiviert werden und bleibt anonymisiert.
-
-Wichtige Zaehlwerte:
-
-- `global inside`: aktuell stabil anwesende globale Personen
-- `global in`: bestaetigte globale Eintritte
-- `global out`: bestaetigte globale Austritte
-- `camera 1/2 visible`: aktuell sichtbare Personen pro Kamera
-- `suppressed`: unterdrueckte Doppelzaehlungen
-- `uncertain`: unsichere Ereignisse
-
-## Zaehllogik
-
-Die globale Live-Zaehlung ist von der Anzeige sichtbarer Personen getrennt. Eine Person wird erst nach mehreren bestaetigten Frames als `inside` gezaehlt. Wenn sie verschwindet, wartet die Pipeline eine kurze Grace-Zeit, bevor `inside` sinkt und `global out` steigt.
-
-Vor Tracking werden nur echte Personendetektionen mit ausreichender Konfidenz, sinnvoller Groesse und plausibler Box-Form verwendet. Re-ID ist im sicheren Standard deaktiviert.
-
-Es werden keine Gesichter erkannt, keine Namen gespeichert und keine dauerhaften biometrischen Gesichtsdaten abgelegt.
-
-## Datenbank
-
-Die lokale SQLite-Datenbank speichert standardmaessig nur aggregierte Zaehler. Granulare Ereignisse sind aus; optional aktivierte Ereignisse erfordern einen externen Verschluesselungsschluessel, werden pseudonymisiert und nach kurzer Frist automatisch geloescht.
-
-## Tests
-
-Normale Tests:
+Die Terminalschritte in diesem Abschnitt richten sich ausschließlich an Entwicklung und CI:
 
 ```bash
+python3 -m venv --system-site-packages .venv
+. .venv/bin/activate
+python -m pip install -e .
 pytest
+PYTHONPATH=src python -m visitor_counter.emulator
+python scripts/build_deb.py --architecture arm64
 ```
 
-Hardwaretests auf dem Raspberry Pi:
+Hardwaretests sind mit `hardware` markiert. Emulator und Tests dürfen synthetische Daten nutzen; der Produktionsdienst darf das nicht.
 
-```bash
-pytest -m hardware
-```
+## Build und CI
 
-Secret-Erzeugung, TLS, Rollen, Export und Loeschung sind in [docs/PRIVACY_AND_SECURITY.md](docs/PRIVACY_AND_SECURITY.md) beschrieben.
+GitHub Actions prüft Python 3.11/3.12, GUI-Smoke-Tests im Offscreen-Modus, Counter/Datenbank/API/Auth/Lizenz/Privacy-Regressionen, den Digital Twin, Python-Compile-Checks, Security-/Dependency-Audits, Secret-Pattern-Guard und reproduzierbaren DEB-Build. Große Binärdateien und HEFs werden nicht als normale Git-Dateien eingecheckt.
 
-## Deployment auf den Raspberry Pi
+Ein AppImage ist derzeit bewusst kein Primärartefakt: HailoRT, Kernel-/Firmwareintegration, Gerätezugriffe und systemd/PolicyKit lassen sich nicht zuverlässig in ein portables Einzeldateiformat kapseln. Das DEB bleibt der unterstützte Produktionsweg.
 
-Wenn der Pi erreichbar ist:
+## Projektstatus
 
-```powershell
-.\tools\deploy_pi_live_counter_fix.ps1
-```
-
-Das Skript kopiert die relevanten Fix-Dateien auf den Pi, fuehrt die wichtigsten Tests aus, startet `visitor-counter.service` neu und zeigt relevante Logzeilen.
-
-## systemd Autostart
-
-User-Service auf dem Raspberry Pi:
-
-```bash
-systemctl --user status visitor-counter.service
-systemctl --user restart visitor-counter.service
-journalctl --user -u visitor-counter.service -f
-```
-
-System-Service, falls genutzt:
-
-```bash
-sudo cp systemd/visitor-counter.service /etc/systemd/system/visitor-counter.service
-sudo systemctl daemon-reload
-sudo systemctl enable visitor-counter.service
-sudo systemctl start visitor-counter.service
-```
-
-## Fehlerdiagnose
-
-```bash
-./scripts/check_hardware.sh
-PYTHONPATH=src python3 -c "from pathlib import Path; from visitor_counter.diagnostics import collect_diagnostics; collect_diagnostics(Path.cwd())"
-cat logs/diagnostics_report.json
-```
-
-## GitHub Pages Konzeptseite
-
-`index.html` stammt aus der vorherigen GitHub-`main`-Historie und beschreibt eine animierte Konzeptseite fuer das KI-Kameraprojekt. Sie ist nicht der produktive Raspberry-Pi-Runtime-Code.
+Software-, GUI-, API-, Datenbank-, Datenschutz- und Packaging-Verhalten sind hardwareunabhängig testbar. Aussagen zu realer Erkennungsgenauigkeit, Hailo-Latenz, Temperatur und WLAN-Stabilität erfordern Abnahmemessungen auf dem Zielgerät; die dafür vorgesehenen Hardwaretests und Diagnoseansichten sind separat dokumentiert.

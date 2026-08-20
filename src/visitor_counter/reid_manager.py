@@ -128,6 +128,8 @@ class OSNetReIDManager:
 
             self._hailo_module = hailo_platform
             params = hailo_platform.VDevice.create_params()
+            if hasattr(params, "scheduling_algorithm"):
+                params.scheduling_algorithm = hailo_platform.HailoSchedulingAlgorithm.ROUND_ROBIN
             if hasattr(params, "group_id"):
                 params.group_id = "SHARED"
             self._vdevice = hailo_platform.VDevice(params)
