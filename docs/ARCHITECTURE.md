@@ -22,6 +22,7 @@ Application Services
   ├─ HardwareDiagnostics
   ├─ ServiceManager
   ├─ LicenseService
+  ├─ ModelInstallationService + SecurityAssetService
   ├─ DiagnosticBundleExporter
   └─ Event/Statistics queries
            │
@@ -72,7 +73,7 @@ Eine zentrale Pfadauflösung entscheidet anhand expliziter CLI-Optionen, Install
 
 ## Konfiguration
 
-YAML bleibt ein serialisierbares Austausch- und Deploymentformat, ist aber nicht das primäre Benutzerinterface. `SettingsService` validiert Änderungen atomar, legt eine restriktiv berechtigte Sicherung an und schreibt über temporäre Datei plus Rename. Secrets werden getrennt von der normalen Konfiguration in einer Datei mit Modus `0600` oder einem Desktop-Keyring gespeichert.
+YAML bleibt ein serialisierbares Austausch- und Deploymentformat, ist aber nicht das primäre Benutzerinterface. `SettingsService` validiert Änderungen atomar und schreibt über temporäre Datei plus Rename. Secrets werden getrennt von der normalen, GUI-lesbaren Konfiguration gespeichert. Das Paket legt API-/Datenschlüssel in `/etc/personenzaehler/api.env` mit `0640` sowie private TLS-Schlüssel mit restriktiven Rechten ab. Lizenz, HEF, TLS und Konfiguration gelangen ausschließlich über feste, geprüfte PolicyKit-Ziele in den Systemmodus.
 
 ## Lizenzmodell
 
@@ -106,4 +107,3 @@ Die bestehende Android-App bleibt auf `/api/v1` kompatibel. Neue Felder werden a
 ## Packaging
 
 Das Debian-Paket installiert Python-Anwendung, Desktop-Datei, Icon, Standardkonfiguration, systemd-Einheiten und eine eng begrenzte PolicyKit-Aktion. HailoRT, Firmware und gerätespezifische Herstellerpakete werden geprüft, aber nicht durch eine CPU-Lösung ersetzt oder unehrlich gebündelt. Ein AppImage ist wegen Systemtreiber, HailoRT, V4L2-Gruppen und Serviceintegration höchstens ein experimenteller GUI-Client, nicht das primäre Produktionspaket.
-

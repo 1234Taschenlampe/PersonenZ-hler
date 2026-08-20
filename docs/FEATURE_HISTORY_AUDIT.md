@@ -105,3 +105,16 @@ Bekannte technische Risiken des Ausgangsstands:
 6. First-Run, Lizenz, Serviceverwaltung, Diagnose und Einstellungen werden als Application Services implementiert und von GUI-Seiten konsumiert.
 7. `.deb`, Desktop-Datei, Icon, systemd-/PolicyKit-Integration und CI werden als normale Projektbestandteile getestet.
 
+## Umsetzungsergebnis 1.0.0
+
+Die Zielentscheidungen der Matrix sind umgesetzt:
+
+- Beide historischen Feature-Linien wurden mit erhaltener Git-Ancestry gemergt; aktuelle Datenschutzdokumente und sichere Defaults gewannen bei Konflikten.
+- RTSP/HTTP, headless Service, Hailo-OSNet, signierte Lizenz, Emulator und CI sind wieder im gemeinsamen Stamm.
+- Ereignisgesteuerte Belegung, verschlüsselter eindeutiger Tageszähler und Durchfluss wurden wiederhergestellt.
+- Fehlrichtungen sind nun ein eigener persistenter Ereignis-/Zählervertrag und verändern weder Belegung noch Durchfluss.
+- REST/WebSocket/Video-API v1 blieb kompatibel; Android erhielt additive Felder für Tagesbesucher, Durchfluss und Fehlrichtungen.
+- Die neue native Desktop-Shell kapselt Einstellungen, Kameras, Modelle, Lizenz, TLS, Android-Pairing, systemd, Logs und Diagnose hinter Application Services und PolicyKit.
+- Das reproduzierbare ARM64-DEB installiert Standardpfade, Desktop-/MIME-/Iconintegration, gehärtete Dienste und zufällige Secrets.
+
+Bewusst nicht in den produktiven Kern reaktiviert wurden der lokale Gemma-Projektagent, alte YOLO26x-Toolchains, historische Log-/Screenshot-Artefakte und CPU-/Dummy-Fallbacks. Die Gründe bleiben Fachfremdheit/Angriffsfläche, technische Ablösung, fehlender Laufzeitwert beziehungsweise Verstoß gegen den verbindlichen Hailo-Produktionsvertrag.

@@ -1,251 +1,92 @@
-# PersonenZähler V2
+# PersonenZähler Desktop Suite
 
-Lokaler Dual-Kamera-Personenzähler für Raspberry Pi 5 + Hailo-10H. Ziel ist eine robuste Ein-/Ausgangszählung mit möglichst wenig dauerhaft gespeicherten personenbezogenen Daten.
+PersonenZähler ist eine native Linux-Desktop-Anwendung für lokale, Hailo-beschleunigte Besucher- und Belegungszählung auf einem Raspberry Pi 5 mit aktuellem 64-Bit Raspberry Pi OS (Trixie). Die Produktionsarchitektur verwendet zwei konfigurierbare Kameraquellen, YOLO26m auf Hailo-10H, lokales Tracking, temporäre OSNet-Re-ID, kameraübergreifenden Consensus und eine lokale SQLite-Datenbank.
 
-Das Laufzeitsystem verwendet das YOLO26m COCO Detection HEF fuer Hailo-10H und filtert auf COCO-Klasse `person`. Es soll keine CPU-Inferenz, OpenCV-DNN, Dummy-Daten oder Pose-HEFs als Ersatz fuer die produktive Detektion verwenden.
+![Übersicht der nativen Desktop-Anwendung](docs/screenshots/overview.png)
 
-## Zaehlkonzept
+## Installation für Anwender
 
-Die produktiven Zaehlwerte sind klar getrennt:
+1. Das ARM64-Paket `personenzaehler_1.0.0_arm64.deb` aus dem GitHub-Actions-Artefakt laden.
+2. Die Datei im grafischen Paketinstaller von Raspberry Pi OS/Debian öffnen und **Installieren** wählen.
+3. **PersonenZähler** aus dem App-Menü starten.
+4. Den Einrichtungsassistenten abschließen.
 
-- **Aktuell im Gebaeude:** steigt bei einem bestaetigten Eintritt um 1 und sinkt bei einem bestaetigten Austritt um 1.
-- **Besucher heute (eindeutig):** dieselbe Person soll pro lokalem Kalendertag nur einmal gezaehlt werden. Dafuer wird OSNet-ReID verwendet.
-- **Eintritte gesamt:** jeder bestaetigte Eintritt erhoeht diesen persistenten Zaehler.
-- **Austritte gesamt:** jeder bestaetigte Austritt erhoeht diesen persistenten Zaehler.
-- **Durchfluss gesamt:** `Eintritte gesamt + Austritte gesamt`.
+Für Installation und normalen Betrieb sind keine Python-, Shell- oder `systemctl`-Befehle nötig. Das Paket installiert Desktop-Starter, Icon, MIME-Typ, PolicyKit-Helfer, Systemdienste, sichere Laufzeitverzeichnisse und automatisch erzeugte API-/Datenschlüssel. Details stehen in der [Installationsanleitung](docs/INSTALLATION.md).
 
-Die Belegung wird damit nicht mehr aus der blossen Sichtbarkeit in einem Kamerabild abgeleitet. Sichtbare Personen bleiben ein Diagnosewert; die Belegung aendert sich nur durch akzeptierte Linienuebertritte.
+HailoRT und die Firmware sind hardwarespezifische Herstellerkomponenten. Die Anwendung erkennt fehlende Komponenten und meldet **KI-Beschleuniger nicht bereit**; sie startet keinen versteckten CPU-, Dummy- oder Ersatzmodellpfad. Die beiden produktiven HEF-Dateien werden über **KI & Hardware** importiert.
 
-Fuer den eindeutigen Tageszaehler werden Re-ID-Embeddings nur fuer den aktiven Tag vorgehalten. Ist `VISITOR_COUNTER_DATA_KEY` gesetzt, werden diese Tagesprofile verschluesselt lokal in `data/daily_unique.sqlite3` abgelegt, damit ein Neustart nicht automatisch zu Doppelzaehlungen fuehrt. Beim Tageswechsel werden alte Tagesprofile geloescht. Ohne Schluessel arbeitet der Tageszaehler nur im RAM und ist nach einem Neustart nicht vollstaendig deduplizierungssicher.
+## Funktionsumfang
 
-## Privacy & GDPR
+- moderne native PySide6-Oberfläche mit Sidebar, Cards, Light/Dark Mode und Hintergrund-Workern
+- First-Run-Assistent für System, Hailo, Modelle, Kameras, Datenschutz, API und Lizenz
+- getrennte Zähler für aktuelle Belegung, eindeutige Tagesbesucher, Eintritte, Austritte und Gesamtdurchfluss
+- Doppelzählungsunterdrückung, unsichere Entscheidungen und konfigurierbare Fehlrichtungsereignisse
+- USB/V4L2- sowie RTSP/RTSPS/HTTP(S)-Kameras mit Rollen und Richtungskonfiguration
+- lokaler Produktionsdienst und versionierte REST-/WebSocket-API
+- Android-Monitoring einschließlich Status, Events, Video-Endpunkte und additive Zählerfelder
+- grafische Serviceverwaltung, Logs, Hardwareprüfung, Modell-/Lizenz-/TLS-Import und redigierter Diagnoseexport
+- signierte Ed25519-Lizenzen; der private Herausgeberschlüssel ist nicht Bestandteil des Repositorys oder Pakets
+- datenschutzfreundliche Voreinstellungen: lokale Verarbeitung, keine Aufzeichnung, keine Gesichtserkennung, granulare Ereignisse aus
 
-Das Projekt ist auf **lokale Verarbeitung und datenschutzfreundliche Voreinstellungen** ausgelegt. Im sicheren Standardbetrieb werden Kamerabilder nur fuer die laufende Personenerkennung verarbeitet und nicht dauerhaft als Video oder Einzelbild gespeichert. Gesichtserkennung und Namenszuordnung sind nicht vorgesehen. Granulare Personenereignisse sind standardmaessig deaktiviert.
+## Zählmodell
 
-Der optionale bzw. fuer den eindeutigen Tageszaehler aktivierte OSNet-ReID-Mechanismus verarbeitet Merkmalsvektoren aus dem Erscheinungsbild einer Person, um Wiederholungsbesuche am selben Tag zu erkennen. Diese Re-ID-Profile werden nicht als dauerhaftes Personenregister verwendet: sie gelten nur fuer den aktiven Kalendertag, werden lokal verarbeitet und bei vorhandener Persistenz verschluesselt gespeichert. Vor einem realen Einsatz muss der Betreiber die datenschutzrechtliche Zulaessigkeit dieses Re-ID-Zwecks gesondert pruefen.
+- **Aktuell im Gebäude:** ändert sich nur durch bestätigte Linienübertritte, nicht durch sichtbare Bounding Boxes.
+- **Besucher heute:** zählt temporäre Re-ID-Profile pro lokalem Kalendertag einmal. Profile werden beim Tageswechsel gelöscht; persistierte Profile sind verschlüsselt.
+- **Eintritte/Austritte:** persistente, getrennte Passagezähler.
+- **Gesamtdurchfluss:** Eintritte plus Austritte, einschließlich späterer Wiederkehr derselben Person.
+- **Fehlrichtungen:** ansonsten valide, aber nicht als Ein-/Austritt konfigurierte Übergänge; sie verändern die Belegung nicht.
 
-Weitere Schutzmechanismen umfassen standardmaessig deaktivierte Live-/Remote-Videostreams, lokale API-Bindung an `127.0.0.1`, rollenbasierte API-Tokens, kurze Datenaufbewahrung und technische Sperren vor dem Kamerastart, solange die erforderlichen Betreiberangaben nicht dokumentiert sind.
+Re-ID erzeugt keine reale Identität, keinen Namen und keine Gesichtserkennung. Ohne verfügbaren Datenschutzschlüssel bleibt der Tageszähler im RAM und wird transparent als eingeschränkt neustartfest markiert.
 
-**Wichtig:** Diese technischen Massnahmen machen einen konkreten Einsatz nicht automatisch DSGVO-konform. Der Betreiber muss insbesondere Zweck, Rechtsgrundlage, Erfassungsbereich, Transparenzinformation, Speicherdauer, Zugriffsrechte und gegebenenfalls die Erforderlichkeit einer Datenschutz-Folgenabschaetzung fuer den jeweiligen Einsatz pruefen.
+## Bedienung
 
-Dokumentation:
+Die neun Bereiche der Anwendung sind **Übersicht**, **Kameras**, **Ereignisse**, **Verlauf**, **KI & Hardware**, **System**, **Datenschutz**, **Einstellungen** und **Über**. Administrative Aktionen werden eng begrenzt über PolicyKit bestätigt; die GUI selbst läuft nie als Root. Das [Benutzerhandbuch](docs/USER_MANUAL.md) beschreibt Einrichtung, Android-Pairing, Diagnose und Fehlerbilder.
 
-- [DSGVO-Dokumentation](docs/DSGVO_DOKUMENTATION.md)
-- [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md)
-- [Vorlage fuer den Datenschutz-Hinweis am Kamerabereich](docs/PRIVACY_NOTICE_TEMPLATE.md)
+## Datenschutz und Sicherheit
 
-## Hardware
+PersonenZähler stellt technische Privacy-by-Design-Maßnahmen bereit. Das bedeutet nicht, dass jeder konkrete Kameraeinsatz automatisch DSGVO-konform ist. Der Betreiber muss insbesondere Zweck, Rechtsgrundlage, Transparenzinformation, Erfassungsbereich, Speicherdauer, Zugriffsrechte und eine mögliche DSFA/DPIA für seinen Einsatz bewerten.
 
-- Raspberry Pi 5 mit 64-bit Raspberry Pi OS oder kompatiblem Debian
-- Hailo-10H
-- Zwei V4L2-kompatible USB-Kameras
-- Empfohlen: stabile Kamera-Pfade unter `/dev/v4l/by-path/` oder `/dev/v4l/by-id/`
+- keine permanente Video- oder Bildspeicherung im Standardbetrieb
+- keine Gesichtserkennung, Namen oder dauerhafte biometrische Identitätsdatenbank
+- lokale Hailo-Verarbeitung und externe Telemetrie gesperrt
+- Remote-Livebild standardmäßig aus; Netzwerk-API außerhalb Loopback nur mit Authentifizierung und TLS
+- rollenbasierte Zufallstokens, redigierte Logs/Diagnose und kurze Retention
+- optionale granulare Ereignisse nur verschlüsselt
+- tägliche Löschung temporärer Re-ID-Profile
 
-## Installation
+Siehe [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md), [DSGVO-Dokumentation](docs/DSGVO_DOKUMENTATION.md) und [technisches Security Review](docs/SECURITY_REVIEW.md).
 
-Fuer Raspberry Pi OS/Debian steht ein zusammengefasster Installer bereit:
+## Architektur und Feature-Erhalt
 
-```bash
-./scripts/install_linux_app.sh
-```
+Die Desktop-GUI ist von Produktionsdienst und Inferenz getrennt. Application/Core, Kamera, Inferenz, Tracking/Re-ID, Counter, Datenbank, API, Privacy/Security, Diagnose, Serviceverwaltung und Packaging besitzen klar abgegrenzte Module. Die vollständige Historie wurde geprüft; wiederhergestellte V2-, WLAN-/Re-ID-, Lizenz-, API-, Android- und Tageszählerfunktionen bleiben mit ihrer Git-Ancestry erhalten.
 
-Er installiert die normalen Linux-Abhaengigkeiten, erstellt die Python-Umgebung mit Zugriff auf systemweite Hailo-Bindings, erzeugt lokale Secrets, installiert Desktop-Starter und Autostart und prueft HailoRT. Fehlt HailoRT auf Raspberry Pi OS, versucht der Installer das offizielle `hailo-all`-Paket zu installieren.
+- [Aktuelle Architektur](docs/ARCHITECTURE.md)
+- [Historien- und Feature-Audit](docs/FEATURE_HISTORY_AUDIT.md)
+- [V2-Architektur](docs/ARCHITECTURE_V2.md)
+- [Android-App](docs/ANDROID_APP.md)
+- [Lizenzsystem](docs/LICENSE_SYSTEM.md)
 
-Die projektspezifischen HEF-Dateien muessen unter folgenden Pfaden vorhanden sein:
+## Entwicklerinstallation
 
-```text
-models/yolo26m_detection_hailo10h_640.hef
-models/osnet_x1_0_hailo10h.hef
-```
-
-Manuelle Installation:
-
-```bash
-./scripts/install.sh
-./scripts/check_hardware.sh
-```
-
-## HailoRT pruefen
-
-```bash
-hailortcli --version
-hailortcli fw-control identify
-```
-
-Wenn diese Befehle fehlen oder kein Geraet melden, startet die App nicht in den produktiven Detektions-/Re-ID-Betrieb.
-
-## Kameraerkennung
+Die Terminalschritte in diesem Abschnitt richten sich ausschließlich an Entwicklung und CI:
 
 ```bash
-v4l2-ctl --list-devices
-ls -l /dev/v4l/by-path/
-ls -l /dev/video*
-```
-
-Die GUI kann Kameras automatisch erkennen oder manuell pro Kamera auswaehlen. Metadaten-Nodes wie `/dev/video1` oder `/dev/video3` werden nicht als Bildquellen verwendet, wenn sie keine Frames liefern.
-
-## Programmstart
-
-Vor dem ersten Kamerastart muessen Rechtsgrundlage, Zweck, Verantwortlicher, Kontakt und der sichtbar angebrachte Datenschutzhinweis in `config/config.yaml` dokumentiert werden. Ohne diese Freigabe startet die Kameraverarbeitung nicht. Details: [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
-
-```bash
-./scripts/start_gui.sh
-```
-
-Alternativ:
-
-```bash
-PYTHONPATH=src python3 -m visitor_counter.app --project-root "$PWD"
-```
-
-## Desktop-Icon
-
-Auf dem Raspberry Pi:
-
-```bash
-./scripts/install_desktop_icon.sh
-```
-
-Das erstellt einen Desktop- und App-Menü-Launcher.
-
-## Historische V2-Zielarchitektur
-
-```text
-WLAN-Kamera 1 ─┐
-                ├─ eigener Router ─ Raspberry Pi 5 + Hailo-10H
-WLAN-Kamera 2 ─┘                         │
-                                        ├─ YOLO26m Person Detection
-                                        ├─ lokales Tracking
-                                        ├─ OSNet ReID
-                                        ├─ temporäre globale Person-ID
-                                        ├─ A/neutral/B-Zonenlogik
-                                        ├─ Dual-Camera-Consensus
-                                        ├─ SQLite / lokale API
-                                        └─ zwei lokale Displays
-```
-
-Die Kameras können RTSP/RTSPS/HTTP/HTTPS liefern; USB/V4L2 bleibt für Entwicklung und Tests unterstützt. Der Pi sollte am eigenen Router nach Möglichkeit per Ethernet hängen.
-
-## Zähllogik
-
-YOLO26m erkennt nur Personen. Lokales Tracking hält Bewegungsverläufe innerhalb einer Kamera stabil. OSNet erzeugt temporäre Merkmalsvektoren zur kameraübergreifenden Wiedererkennung. Eine interne `global_person_id` verbindet lokale Tracks derselben unbekannten Person; sie wird nicht mit Namen oder realen Identitäten verknüpft. Eine Zählung entsteht erst durch die deterministische Passage-Logik aus Zonenfolge, Richtung, Zeitfenster und Consensus. ReID allein darf keine Person zählen.
-
-`inside`, `entered` und `exited` werden in der Produktionspipeline nur durch bestätigte Crossing-/Consensus-Ereignisse verändert. Sichtbarkeit ist davon getrennte Telemetrie.
-
-## Datenschutzstandard
-
-- Verarbeitung lokal auf Pi/Hailo
-- keine Cloud-Telemetrie für Kameradaten
-- temporäre pseudonyme Person-ID bleibt für Matching erhalten
-- OSNet ReID bleibt für Cross-Camera-Matching aktiv
-- keine Gesichtserkennung und keine Namenszuordnung
-- keine Alters-, Geschlechts-, Emotions- oder Herkunftsklassifizierung
-- keine dauerhafte Speicherung von Video oder Einzelbildern
-- ReID-Embeddings nur temporär im RAM
-- granulare Ereignisspeicherung standardmäßig aus
-- Remote-API nur mit Authentifizierung; außerhalb Loopback zusätzlich TLS
-- Kamerabetrieb wird blockiert, solange Betreiber-, Zweck- und Datenschutzhinweis-Felder nicht ausgefüllt sind
-
-Lokale Verarbeitung bedeutet nicht automatisch DSGVO-Konformität. Der konkrete Standort und Einsatzzweck müssen separat geprüft werden. Siehe [Datenschutzprüfung Deutschland 2026](docs/PRIVACY_GERMANY_2026.md) und [Datenschutz- und Sicherheitskonzept](docs/PRIVACY_AND_SECURITY.md).
-
-## Lizenz- und Startschutz
-
-Der normale GUI- und Service-Start ist für die Produktivkonfiguration fail-closed geschützt. Die Anwendung prüft eine lokal signierte Lizenz und standardmäßig eine dazu passende signierte Freischaltung auf GitHub. Die Prüfung nutzt HTTPS und Ed25519-Signaturen; der private Signierschlüssel gehört nicht auf den Raspberry Pi oder ins Repository. Der Emulator bleibt davon getrennt, damit Entwicklung und CI möglich sind.
-
-Die Oberfläche unterscheidet:
-
-- `Aktuell im Gebaeude`
-- `Besucher heute (eindeutig)`
-- `Durchfluss gesamt`
-- `Eintritte gesamt`
-- `Austritte gesamt`
-- sichtbare Personen pro Kamera
-- unterdrueckte Doppelzaehlungen
-- unsichere Ereignisse
-
-Details: [Lizenz- und Entitlement-System](docs/LICENSE_SYSTEM.md).
-
-## Digital Twin
-
-Die lokale SQLite-Hauptdatenbank speichert standardmaessig nur aggregierte Zaehler. Granulare Ereignisse sind aus; optional aktivierte Ereignisse erfordern einen externen Verschluesselungsschluessel, werden pseudonymisiert und nach kurzer Frist automatisch geloescht.
-
-Der eindeutige Tageszaehler verwendet bei vorhandenem `VISITOR_COUNTER_DATA_KEY` zusaetzlich `data/daily_unique.sqlite3`. Dort liegen nur verschluesselte Re-ID-Embeddings des aktiven Tages sowie Zeitstempel. Alte Tagesprofile werden beim Tageswechsel geloescht.
-
-Der Hardware-freie Emulator verwendet die echte Tracking-, Identity-, Zonen- und Consensus-Logik, ersetzt aber Kamera, YOLO/Hailo und OSNet durch deterministische synthetische Daten.
-
-```bash
-PYTHONPATH=src python -m visitor_counter.emulator
-```
-
-Grafisch:
-
-```bash
-PYTHONPATH=src python -m visitor_counter.emulator_gui
-```
-
-Details: [Digital-Twin-Emulator](docs/EMULATOR.md).
-
-## Lokaler KI-Assistent
-
-Ein lokaler Projektassistent ist vorbereitet. Standardmodell ist Gemma 4 E2B Instruct über einen ausschließlich auf Loopback erreichbaren `llama.cpp`-Server. Er durchsucht freigegebene Projektdateien lokal, erklärt das System und kann kleine Änderungen vorschlagen. Änderungen werden nie autonom angewendet, sondern benötigen eine explizite Bestätigung und passieren eine deterministische Sicherheitsprüfung.
-
-Details: [Lokaler Projektassistent](docs/LOCAL_AGENT.md).
-
-## Tests und CI
-
-```bash
+python3 -m venv --system-site-packages .venv
+. .venv/bin/activate
+python -m pip install -e .
 pytest
 PYTHONPATH=src python -m visitor_counter.emulator
+python scripts/build_deb.py --architecture arm64
 ```
 
-GitHub Actions führt Unit-Tests, Digital-Twin-Abnahmetests, Python-Compile-Checks, Bandit-Audit, Dependency-Audit und Secret-Pattern-Prüfung aus. Hardwaretests bleiben separat markiert:
+Hardwaretests sind mit `hardware` markiert. Emulator und Tests dürfen synthetische Daten nutzen; der Produktionsdienst darf das nicht.
 
-```bash
-pytest -m hardware
-```
+## Build und CI
 
-## WLAN-Konfiguration
+GitHub Actions prüft Python 3.11/3.12, GUI-Smoke-Tests im Offscreen-Modus, Counter/Datenbank/API/Auth/Lizenz/Privacy-Regressionen, den Digital Twin, Python-Compile-Checks, Security-/Dependency-Audits, Secret-Pattern-Guard und reproduzierbaren DEB-Build. Große Binärdateien und HEFs werden nicht als normale Git-Dateien eingecheckt.
 
-`config/config.wlan.example.yaml` enthält eine Vorlage ohne echte Zugangsdaten. Reale RTSP-Benutzer, Passwörter und URLs gehören nicht ins Repository.
+Ein AppImage ist derzeit bewusst kein Primärartefakt: HailoRT, Kernel-/Firmwareintegration, Gerätezugriffe und systemd/PolicyKit lassen sich nicht zuverlässig in ein portables Einzeldateiformat kapseln. Das DEB bleibt der unterstützte Produktionsweg.
 
-## Dokumentation
+## Projektstatus
 
-- [Architektur V2](docs/ARCHITECTURE_V2.md)
-- [Digital Twin](docs/EMULATOR.md)
-- [Datenschutz Deutschland 2026](docs/PRIVACY_GERMANY_2026.md)
-- [Datenschutz und Sicherheit](docs/PRIVACY_AND_SECURITY.md)
-- [Lizenzsystem](docs/LICENSE_SYSTEM.md)
-- [Lokaler Gemma-Assistent](docs/LOCAL_AGENT.md)
-- [Jugend-forscht-Projektdokumentation](docs/JUGEND_FORSCHT_PROJECT.md)
-
-## Status
-
-Logik und Software können über CI und Emulator getestet werden. Aussagen zu realer Erkennungsgenauigkeit, Hailo-Leistung, thermischem Verhalten und WLAN-Stabilität werden erst nach Messungen auf der Zielhardware getroffen.
-
-## systemd Autostart
-
-Der empfohlene User-Service wird durch `scripts/install_autostart.sh` erzeugt. Er laedt die lokalen Secrets aus:
-
-```text
-~/.config/personenzaehler/api.env
-```
-
-Status und Neustart:
-
-```bash
-systemctl --user status visitor-counter.service
-systemctl --user restart visitor-counter.service
-journalctl --user -u visitor-counter.service -f
-```
-
-## Fehlerdiagnose
-
-```bash
-./scripts/check_hardware.sh
-PYTHONPATH=src python3 -c "from pathlib import Path; from visitor_counter.diagnostics import collect_diagnostics; collect_diagnostics(Path.cwd())"
-cat logs/diagnostics_report.json
-```
-
-## GitHub Pages Konzeptseite
-
-`index.html` stammt aus der vorherigen GitHub-`main`-Historie und beschreibt eine animierte Konzeptseite fuer das KI-Kameraprojekt. Sie ist nicht der produktive Raspberry-Pi-Runtime-Code.
+Software-, GUI-, API-, Datenbank-, Datenschutz- und Packaging-Verhalten sind hardwareunabhängig testbar. Aussagen zu realer Erkennungsgenauigkeit, Hailo-Latenz, Temperatur und WLAN-Stabilität erfordern Abnahmemessungen auf dem Zielgerät; die dafür vorgesehenen Hardwaretests und Diagnoseansichten sind separat dokumentiert.

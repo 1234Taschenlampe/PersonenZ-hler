@@ -4,12 +4,11 @@ Das Projekt besitzt einen expliziten Startschutz. Er ist absichtlich auditierbar
 
 ## Ablauf
 
-Vor dem normalen GUI- oder Service-Start werden zwei signierte Dokumente geprüft:
+Vor dem produktiven Service-Start wird eine lokal installierte, signierte Lizenz geprüft. Die GUI bleibt ohne Lizenz für Einrichtung, Import und Diagnose verfügbar und zeigt den Zustand verständlich an.
 
-1. eine lokale Lizenzdatei auf dem Raspberry Pi,
-2. eine dazu passende Freischaltdatei auf GitHub.
+Optional kann der Herausgeber zusätzlich eine signierte Online-Freischaltung auf GitHub verlangen. Der Paketstandard 1.0 verwendet bewusst die lokale Prüfung; der Online-Check ist nur eine explizit konfigurierbare Zusatzstufe.
 
-Beide Dokumente müssen mit demselben Ed25519-Schlüssel signiert sein und dieselbe `license_id` enthalten. Fehlt die GitHub-Datei, ist sie deaktiviert, abgelaufen, für ein anderes Gerät bestimmt oder ist die Signatur ungültig, startet die Produktionssoftware nicht.
+Wenn die Zusatzstufe aktiv ist, müssen beide Dokumente mit demselben Ed25519-Schlüssel signiert sein und dieselbe `license_id` enthalten. Eine fehlende, deaktivierte, abgelaufene, fremde oder ungültige Lizenz blockiert ausschließlich den Produktionsdienst.
 
 Der Hardware-freie Emulator und synthetische Tests sind davon getrennt, damit Entwicklung und CI ohne Produktivlizenz möglich bleiben.
 
@@ -66,20 +65,20 @@ python scripts/license_tool.py sign \
 
 Dasselbe signierte Dokument kann unter einem eindeutig gewählten Pfad in einem GitHub-Repository als Online-Freischaltung liegen.
 
-Auf dem Pi wird `/etc/personenzaehler/license.env` mit Modus `0600` angelegt:
+Die Anwendung importiert die lokale Lizenz grafisch nach `/etc/personenzaehler/license.json`. Eine optionale Herausgeberkonfiguration kann in der geschützten Service-Umgebung folgende Werte setzen:
 
 ```text
 VISITOR_COUNTER_LICENSE_URL=https://raw.githubusercontent.com/OWNER/REPO/BRANCH/licenses/jf-001.json
 VISITOR_COUNTER_LICENSE_TIMEOUT=5
-VISITOR_COUNTER_LICENSE_FILE=config/license.json
-VISITOR_COUNTER_LICENSE_PUBLIC_KEY=config/license_public_key.pem
+VISITOR_COUNTER_LICENSE_FILE=/etc/personenzaehler/license.json
+VISITOR_COUNTER_LICENSE_PUBLIC_KEY=/usr/share/personenzaehler/license_public_key.pem
 ```
 
-Der systemd-Dienst setzt bereits:
+Der paketierte systemd-Dienst setzt für den Standardbetrieb:
 
 ```text
 VISITOR_COUNTER_LICENSE_REQUIRED=1
-VISITOR_COUNTER_LICENSE_ONLINE_REQUIRED=1
+VISITOR_COUNTER_LICENSE_ONLINE_REQUIRED=0
 ```
 
 ## Sperren und Freigeben
@@ -89,7 +88,7 @@ VISITOR_COUNTER_LICENSE_ONLINE_REQUIRED=1
 - **Ablaufdatum:** `expires_at` auf einen ISO-8601-Zeitpunkt setzen und neu signieren.
 - **Gerätebindung:** `machine_fingerprints` auf einen oder mehrere erlaubte Fingerprints begrenzen.
 
-Ein HTTP-404 wird ausdrücklich als nicht vorhandene Freischaltung behandelt und blockiert den Start.
+Bei explizit aktiviertem Online-Check wird ein HTTP-404 als nicht vorhandene Freischaltung behandelt und blockiert den Produktionsdienst.
 
 ## Grenzen
 
