@@ -60,7 +60,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -nEI '(rtsp|https?)://[^[:space:]/]+:[^[:space:]@]+@|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk-[A-Za-z0-9_-]{20,}' -- ':!docs/**' ':!*.example.*'; then
+          # Tests contain explicit fake credentials to verify redaction and URL handling.
+          if git grep -nEI '(rtsp|https?)://[^[:space:]/]+:[^[:space:]@]+@|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk-[A-Za-z0-9_-]{20,}' -- ':!docs/**' ':!tests/**' ':!*.example.*'; then
             echo 'Potential credential material found in tracked production files.' >&2
             exit 1
           fi
