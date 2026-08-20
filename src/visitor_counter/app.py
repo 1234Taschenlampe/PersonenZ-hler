@@ -40,16 +40,18 @@ def main() -> int:
         else:
             print("WARNING: Production database was modified during the test!")
         return result
-
     try:
         enforce_license(project_root)
     except LicenseError as exc:
         print(f"Start blockiert: {exc}")
         return 4
 
-    from .gui import run_gui
+    from . import gui as gui_module
+    from .enhanced_counting import EnhancedProcessingPipeline, install_enhanced_gui
 
-    return run_gui(project_root)
+    gui_module.ProcessingPipeline = EnhancedProcessingPipeline
+    install_enhanced_gui(gui_module)
+    return gui_module.run_gui(project_root)
 
 
 if __name__ == "__main__":
