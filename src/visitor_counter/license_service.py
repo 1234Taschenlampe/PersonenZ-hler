@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,6 +71,9 @@ class LicenseService:
         key = _load_public_key(self.paths.license_public_key)
         document = _verify_document(raw, key)
         _validate_claims(document, machine_fingerprint())
+        if self.paths.system_layout:
+            self._install_privileged(raw)
+            return self.inspect()
         self.paths.license_file.parent.mkdir(parents=True, exist_ok=True)
         temporary: Path | None = None
         try:
@@ -91,3 +97,33 @@ class LicenseService:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
         return self.inspect()
+
+    def _install_privileged(self, raw: bytes) -> None:
+        helper = Path("/usr/lib/personenzaehler/personenzaehler-admin")
+        if os.name != "posix" or shutil.which("pkexec") is None or not helper.exists():
+            raise LicenseError("Die grafische Systemberechtigung ist nicht installiert")
+        handle, name = tempfile.mkstemp(
+            prefix="personenzaehler-license-", suffix=".json"
+        )
+        temporary = Path(name)
+        try:
+            with os.fdopen(handle, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            result = subprocess.run(
+                ["pkexec", str(helper), "install-license", str(temporary.resolve())],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode:
+                detail = (result.stderr or result.stdout).strip()
+                raise LicenseError(detail or "Lizenz konnte nicht installiert werden")
+        except OSError as exc:
+            raise LicenseError(
+                f"Lizenz konnte nicht installiert werden: {exc}"
+            ) from exc
+        finally:
+            temporary.unlink(missing_ok=True)

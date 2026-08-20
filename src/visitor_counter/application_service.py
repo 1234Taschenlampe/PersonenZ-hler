@@ -22,6 +22,7 @@ class DashboardSnapshot:
     counts: dict[str, Any] = field(default_factory=dict)
     cameras: list[dict[str, Any]] = field(default_factory=list)
     runtime: dict[str, Any] = field(default_factory=dict)
+    api: dict[str, Any] = field(default_factory=dict)
     database: dict[str, Any] = field(default_factory=dict)
     service: ServiceStatus | None = None
     license: LicenseStatus | None = None
@@ -80,6 +81,12 @@ class ApplicationService:
             counts=counts,
             cameras=cameras,
             runtime=dict(live.get("runtime", {})) if live else {},
+            api={
+                "enabled": config.api.enabled,
+                "bind_host": config.api.bind_host,
+                "port": config.api.port,
+                "tls": bool(config.api.tls_certificate and config.api.tls_private_key),
+            },
             database={
                 "path": str(database_path),
                 "exists": database_path.exists(),
@@ -194,7 +201,7 @@ class ApplicationService:
                 f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2
             )
             row = connection.execute(
-                "SELECT entered, exited, inside FROM global_counts WHERE id=1"
+                "SELECT entered, exited, inside, wrong_way FROM global_counts WHERE id=1"
             ).fetchone()
             suppressed = connection.execute(
                 "SELECT COUNT(*) FROM counting_events WHERE counted=0"
@@ -211,6 +218,7 @@ class ApplicationService:
             "entered": int(row[0]),
             "exited": int(row[1]),
             "inside": int(row[2]),
+            "wrong_way": int(row[3]),
             "suppressed": int(suppressed),
             "uncertain": int(uncertain),
         }

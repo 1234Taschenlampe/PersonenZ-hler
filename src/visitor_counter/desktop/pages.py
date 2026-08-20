@@ -316,6 +316,7 @@ class HistoryPage(BasePage):
 
 class HardwarePage(BasePage):
     diagnose_requested = Signal()
+    model_import_requested = Signal(str, Path)
 
     def __init__(self) -> None:
         super().__init__(
@@ -335,6 +336,15 @@ class HardwarePage(BasePage):
         row.addStretch()
         row.addWidget(run)
         self.layout.addLayout(row)
+        imports = QHBoxLayout()
+        detector = QPushButton("YOLO26m-HEF importieren")
+        detector.clicked.connect(lambda: self._choose_model("detector"))
+        reid = QPushButton("OSNet-HEF importieren")
+        reid.clicked.connect(lambda: self._choose_model("reid"))
+        imports.addWidget(detector)
+        imports.addWidget(reid)
+        imports.addStretch()
+        self.layout.addLayout(imports)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText(
@@ -348,13 +358,27 @@ class HardwarePage(BasePage):
         self.hailo.set_state(
             "ok" if ready else "error", "Bereit" if ready else "Nicht erkannt"
         )
+        detector = report.get("detector", {})
+        model_ready = bool(detector.get("exists"))
+        self.model.set_state(
+            "ok" if model_ready else "error",
+            "Installiert" if model_ready else "Fehlt",
+        )
         self.details.setPlainText(json.dumps(report, indent=2, ensure_ascii=False))
+
+    def _choose_model(self, kind: str) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Hailo-Modell importieren", "", "Hailo Executable Format (*.hef)"
+        )
+        if filename:
+            self.model_import_requested.emit(kind, Path(filename))
 
 
 class SystemPage(BasePage):
     service_action_requested = Signal(str)
     logs_requested = Signal()
     diagnostic_export_requested = Signal()
+    pairing_export_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__(
@@ -384,6 +408,9 @@ class SystemPage(BasePage):
         self.database_label = QLabel("Datenbank: unbekannt")
         self.database_label.setProperty("muted", True)
         layout.addWidget(self.database_label)
+        self.api_label = QLabel("API/Android: unbekannt")
+        self.api_label.setProperty("muted", True)
+        layout.addWidget(self.api_label)
         self.layout.addWidget(card)
         toolbar = QHBoxLayout()
         logs = QPushButton("Logs aktualisieren")
@@ -391,8 +418,11 @@ class SystemPage(BasePage):
         export = QPushButton("Diagnosepaket exportieren")
         export.setProperty("primary", True)
         export.clicked.connect(self.diagnostic_export_requested.emit)
+        pairing = QPushButton("Android-Pairing exportieren")
+        pairing.clicked.connect(self.pairing_export_requested.emit)
         toolbar.addWidget(logs)
         toolbar.addWidget(export)
+        toolbar.addWidget(pairing)
         toolbar.addStretch()
         self.layout.addLayout(toolbar)
         self.logs = QPlainTextEdit()
@@ -417,6 +447,12 @@ class SystemPage(BasePage):
         size = int(snapshot.database.get("size_bytes", 0))
         self.database_label.setText(
             f"Datenbank: {'bereit' if exists else 'noch nicht angelegt'} · {size / 1024:.1f} KiB"
+        )
+        api = snapshot.api
+        endpoint = f"{api.get('bind_host', '—')}:{api.get('port', '—')}"
+        protection = "TLS" if api.get("tls") else "nur lokal/kein TLS"
+        self.api_label.setText(
+            f"API/Android: {'aktiv' if api.get('enabled') else 'deaktiviert'} · {endpoint} · {protection}"
         )
 
 
@@ -536,6 +572,7 @@ class PrivacyPage(BasePage):
 
 class SettingsPage(BasePage):
     save_requested = Signal(dict)
+    security_asset_import_requested = Signal(str, Path)
 
     def __init__(self) -> None:
         super().__init__(
@@ -558,12 +595,24 @@ class SettingsPage(BasePage):
         self.api_host = QLineEdit()
         self.api_port = QSpinBox()
         self.api_port.setRange(1, 65535)
+        self.tls_certificate = QLineEdit()
+        self.tls_certificate.setReadOnly(True)
+        self.tls_private_key = QLineEdit()
+        self.tls_private_key.setReadOnly(True)
+        certificate_button = QPushButton("TLS-Zertifikat importieren")
+        certificate_button.clicked.connect(lambda: self._choose_tls("certificate"))
+        key_button = QPushButton("TLS-Schlüssel importieren")
+        key_button.clicked.connect(lambda: self._choose_tls("private_key"))
         form.addRow("Detektionsschwelle", self.confidence)
         form.addRow("Re-ID-Schwelle", self.reid)
         form.addRow("Anwesenheits-Timeout", self.timeout)
         form.addRow("", self.api_enabled)
         form.addRow("API-Bindung", self.api_host)
         form.addRow("API-Port", self.api_port)
+        form.addRow("TLS-Zertifikat", self.tls_certificate)
+        form.addRow("", certificate_button)
+        form.addRow("TLS-Privatschlüssel", self.tls_private_key)
+        form.addRow("", key_button)
         warning = QLabel(
             "Remote-Bindung wird nur mit Authentifizierung und TLS akzeptiert. CPU-/Dummy-Fallbacks können hier nicht aktiviert werden."
         )
@@ -584,6 +633,8 @@ class SettingsPage(BasePage):
         self.api_enabled.setChecked(config.api.enabled)
         self.api_host.setText(config.api.bind_host)
         self.api_port.setValue(config.api.port)
+        self.tls_certificate.setText(config.api.tls_certificate)
+        self.tls_private_key.setText(config.api.tls_private_key)
 
     def _emit_save(self) -> None:
         self.save_requested.emit(
@@ -596,6 +647,16 @@ class SettingsPage(BasePage):
                 "api.port": self.api_port.value(),
             }
         )
+
+    def _choose_tls(self, kind: str) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "TLS-Datei importieren",
+            "",
+            "TLS/PEM (*.crt *.key *.pem);;Alle Dateien (*)",
+        )
+        if filename:
+            self.security_asset_import_requested.emit(kind, Path(filename))
 
 
 class AboutPage(BasePage):

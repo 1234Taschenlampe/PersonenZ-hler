@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=PersonenZähler
+GenericName=Personenzähler
+Comment=Lokale KI-gestützte Belegungs- und Besucherzählung
+Exec=/usr/bin/personenzaehler
+Icon=de.personenzaehler.Desktop
+Terminal=false
+Categories=Utility;Monitor;Qt;
+StartupNotify=true
+StartupWMClass=PersonenZähler
+Keywords=Personen;Zähler;Kamera;Hailo;Belegung;
+MimeType=application/vnd.personenzaehler.license;
+Actions=Diagnostics;
+
+[Desktop Action Diagnostics]
+Name=Diagnose öffnen
+Exec=/usr/bin/personenzaehler --no-wizard

@@ -108,6 +108,11 @@ class FirstRunWizard(QWizard):
         sources = [item.stable_path or item.video_node for item in discovered]
         self.camera_1 = QComboBox()
         self.camera_2 = QComboBox()
+        self.camera_1_role = QComboBox()
+        self.camera_2_role = QComboBox()
+        for role in (self.camera_1_role, self.camera_2_role):
+            role.addItem("Eingang", "entrance")
+            role.addItem("Ausgang", "exit")
         for combo, camera_id in (
             (self.camera_1, "camera_1"),
             (self.camera_2, "camera_2"),
@@ -118,8 +123,22 @@ class FirstRunWizard(QWizard):
             if current and combo.findText(current) < 0:
                 combo.addItem(current)
             combo.setCurrentText(current)
-        camera_layout.addRow("Kamera 1 · Eingang", self.camera_1)
-        camera_layout.addRow("Kamera 2 · Ausgang", self.camera_2)
+        self.camera_1_role.setCurrentIndex(
+            max(
+                0,
+                self.camera_1_role.findData(self.config.cameras["camera_1"].role),
+            )
+        )
+        self.camera_2_role.setCurrentIndex(
+            max(
+                0,
+                self.camera_2_role.findData(self.config.cameras["camera_2"].role),
+            )
+        )
+        camera_layout.addRow("Kamera 1", self.camera_1)
+        camera_layout.addRow("Rolle Kamera 1", self.camera_1_role)
+        camera_layout.addRow("Kamera 2", self.camera_2)
+        camera_layout.addRow("Rolle Kamera 2", self.camera_2_role)
         camera_layout.addRow(
             QLabel(f"Automatisch erkannte Bildquellen: {len(sources)}")
         )
@@ -204,11 +223,11 @@ class FirstRunWizard(QWizard):
         self.config.cameras["camera_1"].device = (
             self.camera_1.currentText().strip() or None
         )
-        self.config.cameras["camera_1"].role = "entrance"
+        self.config.cameras["camera_1"].role = str(self.camera_1_role.currentData())
         self.config.cameras["camera_2"].device = (
             self.camera_2.currentText().strip() or None
         )
-        self.config.cameras["camera_2"].role = "exit"
+        self.config.cameras["camera_2"].role = str(self.camera_2_role.currentData())
         self.config.privacy.controller_name = self.controller.text().strip()
         self.config.privacy.controller_contact = self.contact.text().strip()
         self.config.privacy.purpose = self.purpose.text().strip()

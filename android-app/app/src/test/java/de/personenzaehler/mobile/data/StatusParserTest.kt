@@ -14,7 +14,7 @@ class StatusParserTest {
               "service": "visitor-counter",
               "version": {"server": "visitor-counter", "git_commit": "abc123"},
               "api": {"name": "visitor-counter-status-api", "version": "1"},
-              "counts": {"inside": 2, "entered": 3, "exited": 1, "suppressed": 0, "uncertain": null},
+              "counts": {"inside": 2, "entered": 3, "exited": 1, "daily_unique": 3, "throughput": 4, "wrong_way": 1, "suppressed": 0, "uncertain": null},
               "cameras": [{"camera_id": "camera_1", "name": "Eingang", "status": "ONLINE", "width": 1280, "height": 720}],
               "detector": {"configured_model": "YOLO26m", "active": true, "hef_exists": true},
               "reid": {"configured_model": "OSNet", "ready": true},
@@ -26,6 +26,9 @@ class StatusParserTest {
         )
 
         assertEquals(2, status.counts.inside)
+        assertEquals(3, status.counts.dailyUnique)
+        assertEquals(4, status.counts.throughput)
+        assertEquals(1, status.counts.wrongWay)
         assertNull(status.counts.uncertain)
         assertEquals("camera_1", status.cameras.single().cameraId)
         assertEquals("abc123", status.version.gitCommit)

@@ -37,11 +37,21 @@ class DailyUniqueStore:
     ) -> None:
         self.project_root = project_root
         self.config = config
-        self.threshold = float(config.identity.reid_threshold if threshold is None else threshold)
+        self.threshold = float(
+            config.identity.reid_threshold if threshold is None else threshold
+        )
         self.threshold = max(0.50, min(0.99, self.threshold))
-        self.protector = protector if protector is not None else load_data_protector(config.database, project_root)
+        self.protector = (
+            protector
+            if protector is not None
+            else load_data_protector(config.database, project_root)
+        )
         configured_database = Path(config.database.path).expanduser()
-        data_dir = configured_database.parent if configured_database.is_absolute() else project_root / "data"
+        data_dir = (
+            configured_database.parent
+            if configured_database.is_absolute()
+            else project_root / "data"
+        )
         self.path = data_dir / "daily_unique.sqlite3"
         self._profiles: dict[int, tuple[float, ...]] = {}
         self._fallback_ids: set[int] = set()
@@ -76,7 +86,9 @@ class DailyUniqueStore:
         self._fallback_ids.clear()
         self._next_profile_id = 1
         if self._connection is not None:
-            self._connection.execute("DELETE FROM daily_unique_profiles WHERE day <> ?", (self._day,))
+            self._connection.execute(
+                "DELETE FROM daily_unique_profiles WHERE day <> ?", (self._day,)
+            )
             self._connection.commit()
             self._load_current_day()
 
@@ -93,13 +105,20 @@ class DailyUniqueStore:
                 best_id, best_score = self._best_match(normalized)
                 if best_id is not None and best_score >= self.threshold:
                     self._touch_profile(best_id, timestamp)
-                    LOGGER.info("DAILY_UNIQUE_MATCH profile=%s similarity=%.4f count=%s", best_id, best_score, self.count)
+                    LOGGER.info(
+                        "DAILY_UNIQUE_MATCH profile=%s similarity=%.4f count=%s",
+                        best_id,
+                        best_score,
+                        self.count,
+                    )
                     return False
                 profile_id = self._next_profile_id
                 self._next_profile_id += 1
                 self._profiles[profile_id] = normalized
                 self._persist_profile(profile_id, normalized, timestamp)
-                LOGGER.info("DAILY_UNIQUE_NEW profile=%s count=%s", profile_id, self.count)
+                LOGGER.info(
+                    "DAILY_UNIQUE_NEW profile=%s count=%s", profile_id, self.count
+                )
                 return True
 
         # A missing embedding should not silently lose a real visitor. This fallback
@@ -109,7 +128,9 @@ class DailyUniqueStore:
         if global_person_id in self._fallback_ids:
             return False
         self._fallback_ids.add(global_person_id)
-        LOGGER.warning("DAILY_UNIQUE_FALLBACK global_id=%s count=%s", global_person_id, self.count)
+        LOGGER.warning(
+            "DAILY_UNIQUE_FALLBACK global_id=%s count=%s", global_person_id, self.count
+        )
         return True
 
     def reset(self) -> None:
@@ -158,7 +179,9 @@ class DailyUniqueStore:
     def _load_current_day(self) -> None:
         if self._connection is None or self.protector is None:
             return
-        self._connection.execute("DELETE FROM daily_unique_profiles WHERE day <> ?", (self._day,))
+        self._connection.execute(
+            "DELETE FROM daily_unique_profiles WHERE day <> ?", (self._day,)
+        )
         rows = self._connection.execute(
             "SELECT profile_id, embedding FROM daily_unique_profiles WHERE day = ? ORDER BY profile_id",
             (self._day,),
@@ -174,11 +197,15 @@ class DailyUniqueStore:
                     self._profiles[int(profile_id)] = normalized
                     highest = max(highest, int(profile_id))
             except (ValueError, TypeError, json.JSONDecodeError):
-                LOGGER.warning("Ignoring unreadable daily ReID profile id=%s", profile_id)
+                LOGGER.warning(
+                    "Ignoring unreadable daily ReID profile id=%s", profile_id
+                )
         self._next_profile_id = highest + 1
         self._connection.commit()
 
-    def _persist_profile(self, profile_id: int, embedding: tuple[float, ...], timestamp: float) -> None:
+    def _persist_profile(
+        self, profile_id: int, embedding: tuple[float, ...], timestamp: float
+    ) -> None:
         if self._connection is None or self.protector is None:
             return
         serialized = json.dumps(embedding, separators=(",", ":"))
@@ -224,7 +251,9 @@ class DailyUniqueStore:
 
 
 class _IdentityObserver:
-    def __init__(self, delegate: Any, callback: Callable[[list[TrackedObject]], None]) -> None:
+    def __init__(
+        self, delegate: Any, callback: Callable[[list[TrackedObject]], None]
+    ) -> None:
         self._delegate = delegate
         self._callback = callback
 
@@ -249,7 +278,11 @@ class _IdentityObserver:
 
 
 class _ConsensusObserver:
-    def __init__(self, delegate: Any, callback: Callable[[CrossingEvent, ConsensusDecision], None]) -> None:
+    def __init__(
+        self,
+        delegate: Any,
+        callback: Callable[[CrossingEvent, ConsensusDecision], None],
+    ) -> None:
         self._delegate = delegate
         self._callback = callback
 
@@ -275,14 +308,18 @@ class EnhancedProcessingPipeline(ProcessingPipeline):
     - throughput: entered + exited, exposed as a derived GUI/API value
     """
 
-    def __init__(self, config: AppConfig, project_root: Path, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, config: AppConfig, project_root: Path, *args: Any, **kwargs: Any
+    ) -> None:
         super().__init__(config, project_root, *args, **kwargs)
         self._latest_embeddings_by_global_id: dict[int, tuple[float, ...]] = {}
         self.daily_unique_store = DailyUniqueStore(project_root, config)
         self.global_counts.daily_unique = self.daily_unique_store.count
         self.global_counts.daily_unique_degraded = self.daily_unique_store.degraded
         self.identity = _IdentityObserver(self.identity, self._remember_embeddings)
-        self.consensus = _ConsensusObserver(self.consensus, self._apply_confirmed_crossing)
+        self.consensus = _ConsensusObserver(
+            self.consensus, self._apply_confirmed_crossing
+        )
 
     def run(self) -> None:
         try:
@@ -292,34 +329,46 @@ class EnhancedProcessingPipeline(ProcessingPipeline):
 
     def _remember_embeddings(self, tracks: list[TrackedObject]) -> None:
         for track in tracks:
-            if track.global_person_id is None or track.embedding is None or track.lost_frames != 0:
+            if (
+                track.global_person_id is None
+                or track.embedding is None
+                or track.lost_frames != 0
+            ):
                 continue
-            self._latest_embeddings_by_global_id[track.global_person_id] = track.embedding
+            self._latest_embeddings_by_global_id[track.global_person_id] = (
+                track.embedding
+            )
         if len(self._latest_embeddings_by_global_id) > 10000:
             # The daily store is the durable active-day memory. This cache only needs
             # recent IDs to attach the current crossing event to its embedding.
             for key in list(self._latest_embeddings_by_global_id)[:5000]:
                 del self._latest_embeddings_by_global_id[key]
 
-    def _apply_confirmed_crossing(self, event: CrossingEvent, decision: ConsensusDecision) -> None:
+    def _apply_confirmed_crossing(
+        self, event: CrossingEvent, decision: ConsensusDecision
+    ) -> None:
         if event.global_person_id is None or decision.uncertain:
             self.global_counts.uncertain_consensus += 1
             return
         if not decision.counted:
             self.global_counts.suppressed_duplicates += 1
             return
-        if event.direction is Direction.IN:
+        if event.direction is Direction.UNKNOWN:
+            self.global_counts.wrong_way += 1
+        elif event.direction is Direction.IN:
             self.global_counts.entered += 1
             self.global_counts.inside += 1
-            embedding = self._latest_embeddings_by_global_id.get(event.global_person_id or -1)
-            self.daily_unique_store.register(event.global_person_id or -1, embedding, event.timestamp)
+            embedding = self._latest_embeddings_by_global_id.get(
+                event.global_person_id or -1
+            )
+            self.daily_unique_store.register(
+                event.global_person_id or -1, embedding, event.timestamp
+            )
             self.global_counts.daily_unique = self.daily_unique_store.count
             self.global_counts.daily_unique_degraded = self.daily_unique_store.degraded
         elif event.direction is Direction.OUT:
             self.global_counts.exited += 1
             self.global_counts.inside = max(0, self.global_counts.inside - 1)
-        else:
-            return
         self._persist_global_counts()
         LOGGER.info(
             "PRODUCTION_COUNTER inside=%s unique_today=%s entries=%s exits=%s throughput=%s",
@@ -330,7 +379,9 @@ class EnhancedProcessingPipeline(ProcessingPipeline):
             self.global_counts.entered + self.global_counts.exited,
         )
 
-    def _sync_live_presence_counts(self, visible_ids: set[int], timestamp: float) -> None:
+    def _sync_live_presence_counts(
+        self, visible_ids: set[int], timestamp: float
+    ) -> None:
         # Visibility is useful diagnostic information, but it must not alter occupancy.
         # Occupancy changes only when a validated line-crossing event is accepted.
         _ = visible_ids, timestamp
@@ -387,8 +438,12 @@ def install_enhanced_gui(gui_module: Any) -> None:
 
     def on_stats_ready(self: Any, stats: Any, counts: Any) -> None:
         original_stats_ready(self, stats, counts)
-        self.count_labels["daily_unique"].setText(str(getattr(counts, "daily_unique", 0)))
-        self.count_labels["throughput"].setText(str(int(counts.entered) + int(counts.exited)))
+        self.count_labels["daily_unique"].setText(
+            str(getattr(counts, "daily_unique", 0))
+        )
+        self.count_labels["throughput"].setText(
+            str(int(counts.entered) + int(counts.exited))
+        )
         degraded = bool(getattr(counts, "daily_unique_degraded", False))
         tooltip = (
             "Tages-ReID laeuft nur im RAM bzw. ohne restart-sichere Verschluesselung."
@@ -405,7 +460,9 @@ def install_enhanced_gui(gui_module: Any) -> None:
             return
         try:
             payload = json.loads(self.live_status_path.read_text(encoding="utf-8"))
-            payload.setdefault("counts", {})["daily_unique"] = int(getattr(counts, "daily_unique", 0))
+            payload.setdefault("counts", {})["daily_unique"] = int(
+                getattr(counts, "daily_unique", 0)
+            )
             payload["counts"]["throughput"] = int(counts.entered) + int(counts.exited)
             payload["counts"]["daily_unique_degraded"] = bool(
                 getattr(counts, "daily_unique_degraded", False)

@@ -22,7 +22,15 @@ from .obstruction import CameraObstructionDetector
 from .privacy import anonymize_frame, hidden_preview
 from .reid_manager import OSNetReIDManager
 from .tracker import create_tracker
-from .types import ConsensusDecision, CountingLine, Detection, FramePacket, LatencyWindow, RuntimeStats, TrackedObject
+from .types import (
+    ConsensusDecision,
+    CountingLine,
+    Detection,
+    FramePacket,
+    LatencyWindow,
+    RuntimeStats,
+    TrackedObject,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,13 +79,20 @@ class ProcessingPipeline(Thread):
         self.consensus = DualCameraConsensus(config.consensus)
         self.reid = OSNetReIDManager(config.model, project_root)
         self.identity = GlobalIdentityManager(config.identity)
-        self.trackers = {camera_id: create_tracker(config.tracking)[0] for camera_id in config.cameras}
+        self.trackers = {
+            camera_id: create_tracker(config.tracking)[0]
+            for camera_id in config.cameras
+        }
         self.tracker_status = create_tracker(config.tracking)[1]
-        self.obstruction_detectors = {camera_id: CameraObstructionDetector() for camera_id in config.cameras}
+        self.obstruction_detectors = {
+            camera_id: CameraObstructionDetector() for camera_id in config.cameras
+        }
         self.counters = {
             camera_id: LineCrossingCounter(
                 camera_id,
-                CountingLine(camera.line_start, camera.line_end, camera.in_positive_side),
+                CountingLine(
+                    camera.line_start, camera.line_end, camera.in_positive_side
+                ),
                 config.tracking,
                 camera,
             )
@@ -88,11 +103,13 @@ class ProcessingPipeline(Thread):
         self._last_camera_id: str | None = None
         self._max_frame_age_seconds = 0.50
         self._gui_interval_seconds = 1.0 / 15.0
-        self._next_gui_emit_at: dict[str, float] = {camera_id: 0.0 for camera_id in config.cameras}
+        self._next_gui_emit_at: dict[str, float] = {
+            camera_id: 0.0 for camera_id in config.cameras
+        }
         self._reid_cache: dict[tuple[str, int], tuple[float, tuple[float, ...]]] = {}
         self._inside_global_person_ids: set[int] = set()
         self._live_presence: dict[int, _LivePresenceMemory] = {}
-        self._last_persisted_global_counts: tuple[int, int, int] | None = None
+        self._last_persisted_global_counts: tuple[int, int, int, int] | None = None
         self._last_retention_purge_at = 0.0
 
     def run(self) -> None:
@@ -145,53 +162,102 @@ class ProcessingPipeline(Thread):
                 "frame_age_at_dequeue_ms": (started - packet.monotonic_time) * 1000.0,
             }
             obstruction_start = monotonic()
-            obstruction = self.obstruction_detectors[packet.camera_id].update(packet.image)
+            obstruction = self.obstruction_detectors[packet.camera_id].update(
+                packet.image
+            )
             stage_ms["obstruction_ms"] = (monotonic() - obstruction_start) * 1000.0
-            self.runtime_stats.camera_obstructed[packet.camera_id] = obstruction.obstructed
+            self.runtime_stats.camera_obstructed[packet.camera_id] = (
+                obstruction.obstructed
+            )
             detect_start = monotonic()
             detections = [] if obstruction.obstructed else self._detect(packet)
-            detections = self._filter_person_detections(detections, packet.width, packet.height)
+            detections = self._filter_person_detections(
+                detections, packet.width, packet.height
+            )
             stage_ms["detect_total_ms"] = (monotonic() - detect_start) * 1000.0
             stage_ms.update(self.hailo.last_stage_ms)
             tracker_start = monotonic()
-            tracks = self.trackers[packet.camera_id].update(packet.camera_id, detections)
+            tracks = self.trackers[packet.camera_id].update(
+                packet.camera_id, detections
+            )
             stage_ms["tracker_ms"] = (monotonic() - tracker_start) * 1000.0
-            countable_tracks = self._filter_live_count_tracks(tracks, packet.width, packet.height)
+            countable_tracks = self._filter_live_count_tracks(
+                tracks, packet.width, packet.height
+            )
             reid_start = monotonic()
             tracks = self._with_reid_embeddings(packet, countable_tracks)
             stage_ms["osnet_reid_ms"] = (monotonic() - reid_start) * 1000.0
             identity_start = monotonic()
-            tracks = self.identity.update(packet.camera_id, tracks, packet.captured_at, packet.width, packet.height)
+            tracks = self.identity.update(
+                packet.camera_id,
+                tracks,
+                packet.captured_at,
+                packet.width,
+                packet.height,
+            )
             stage_ms["identity_ms"] = (monotonic() - identity_start) * 1000.0
-            visible_ids = {track.global_person_id for track in tracks if track.global_person_id is not None and track.lost_frames == 0}
+            visible_ids = {
+                track.global_person_id
+                for track in tracks
+                if track.global_person_id is not None and track.lost_frames == 0
+            }
             self.database.update_last_seen(visible_ids, packet.captured_at)
             self.global_counts.visible = self.identity.global_visible
             self.runtime_stats.global_visible = self.identity.global_visible
             self._sync_live_presence_counts(visible_ids, packet.captured_at)
-            events = [] if obstruction.obstructed else self.counters[packet.camera_id].update(packet.frame_id, tracks)
+            events = (
+                []
+                if obstruction.obstructed
+                else self.counters[packet.camera_id].update(packet.frame_id, tracks)
+            )
             for event in events:
                 decision = self.consensus.decide(event)
                 if event.global_person_id is None:
-                    decision = ConsensusDecision(event, False, decision.duplicate_of, True, "missing global person id")
-                
-                self.database.record_decision(decision, self.config.model.model_name, self.runtime_stats.total_latency_ms)
-                
+                    decision = ConsensusDecision(
+                        event,
+                        False,
+                        decision.duplicate_of,
+                        True,
+                        "missing global person id",
+                    )
+
+                self.database.record_decision(
+                    decision,
+                    self.config.model.model_name,
+                    self.runtime_stats.total_latency_ms,
+                )
+
                 camera_num = 1 if packet.camera_id == "camera_1" else 2
                 if decision.counted and not decision.uncertain:
-                    LOGGER.info("COUNT_EVENT camera=%s direction=%s", camera_num, event.direction.value)
+                    LOGGER.info(
+                        "COUNT_EVENT camera=%s direction=%s",
+                        camera_num,
+                        event.direction.value,
+                    )
                 else:
                     reason = decision.reason or "suppressed_or_uncertain"
-                    LOGGER.info("COUNT_REJECTED camera=%s reason=%s", camera_num, reason)
-                
-                LOGGER.info("GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
-                            self.global_counts.inside, self.global_counts.entered, self.global_counts.exited)
+                    LOGGER.info(
+                        "COUNT_REJECTED camera=%s reason=%s", camera_num, reason
+                    )
+
+                LOGGER.info(
+                    "GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
+                    self.global_counts.inside,
+                    self.global_counts.entered,
+                    self.global_counts.exited,
+                )
             draw_start = monotonic()
             annotated = self._annotate(packet, tracks)
             stage_ms["draw_boxes_ms"] = (monotonic() - draw_start) * 1000.0
             gui_start = monotonic()
-            if self.frame_callback and gui_start >= self._next_gui_emit_at[packet.camera_id]:
+            if (
+                self.frame_callback
+                and gui_start >= self._next_gui_emit_at[packet.camera_id]
+            ):
                 self.frame_callback(packet.camera_id, annotated, tracks)
-                self._next_gui_emit_at[packet.camera_id] = gui_start + self._gui_interval_seconds
+                self._next_gui_emit_at[packet.camera_id] = (
+                    gui_start + self._gui_interval_seconds
+                )
             stage_ms["gui_transfer_ms"] = (monotonic() - gui_start) * 1000.0
             frames += 1
             now = monotonic()
@@ -218,7 +284,9 @@ class ProcessingPipeline(Thread):
         self.database.close()
         LOGGER.info("Processing pipeline stopped")
 
-    def _with_reid_embeddings(self, packet: FramePacket, tracks: list[TrackedObject]) -> list[TrackedObject]:
+    def _with_reid_embeddings(
+        self, packet: FramePacket, tracks: list[TrackedObject]
+    ) -> list[TrackedObject]:
         if not self.config.model.reid_required or not self.reid.ready:
             return tracks
         now = monotonic()
@@ -236,7 +304,9 @@ class ProcessingPipeline(Thread):
             cached = self._reid_cache.get(key)
             if cached and now - cached[0] < interval:
                 self.reid.cache_hits += 1
-                updated.append(replace(track, embedding=cached[1], last_reid_at=cached[0]))
+                updated.append(
+                    replace(track, embedding=cached[1], last_reid_at=cached[0])
+                )
                 continue
             embedding = self.reid.infer_embedding(packet.image, track.bbox)
             if embedding is None:
@@ -248,7 +318,9 @@ class ProcessingPipeline(Thread):
 
     def _update_queue_stats(self) -> None:
         self.runtime_stats.queue_length = self.input_queue.qsize()
-        self.runtime_stats.queue_fill = self.runtime_stats.queue_length / max(self.input_queue.maxsize, 1)
+        self.runtime_stats.queue_fill = self.runtime_stats.queue_length / max(
+            self.input_queue.maxsize, 1
+        )
         self.runtime_stats.dropped_frames = self.input_queue.dropped_counts()
 
     def reset_counts(self) -> None:
@@ -262,15 +334,22 @@ class ProcessingPipeline(Thread):
         self._live_presence.clear()
         self._last_persisted_global_counts = None
 
-    def _sync_live_presence_counts(self, visible_ids: set[int], timestamp: float) -> None:
+    def _sync_live_presence_counts(
+        self, visible_ids: set[int], timestamp: float
+    ) -> None:
         for global_id in visible_ids:
             memory = self._live_presence.get(global_id)
             if memory is None:
-                memory = _LivePresenceMemory(first_seen_at=timestamp, last_seen_at=timestamp)
+                memory = _LivePresenceMemory(
+                    first_seen_at=timestamp, last_seen_at=timestamp
+                )
                 self._live_presence[global_id] = memory
             memory.frames_seen += 1
             memory.last_seen_at = timestamp
-            if memory.counted_inside or memory.frames_seen < self.config.identity.live_entry_min_frames:
+            if (
+                memory.counted_inside
+                or memory.frames_seen < self.config.identity.live_entry_min_frames
+            ):
                 continue
             memory.counted_inside = True
             self._inside_global_person_ids.add(global_id)
@@ -305,7 +384,12 @@ class ProcessingPipeline(Thread):
         self._persist_global_counts()
 
     def _persist_global_counts(self) -> None:
-        snapshot = (self.global_counts.entered, self.global_counts.exited, self.global_counts.inside)
+        snapshot = (
+            self.global_counts.entered,
+            self.global_counts.exited,
+            self.global_counts.inside,
+            self.global_counts.wrong_way,
+        )
         if snapshot == getattr(self, "_last_persisted_global_counts", None):
             return
         database = getattr(self, "database", None)
@@ -315,7 +399,9 @@ class ProcessingPipeline(Thread):
         self.database.set_global_counts(*snapshot)
         self._last_persisted_global_counts = snapshot
 
-    def _filter_person_detections(self, detections: list[Detection], frame_width: int, frame_height: int) -> list[Detection]:
+    def _filter_person_detections(
+        self, detections: list[Detection], frame_width: int, frame_height: int
+    ) -> list[Detection]:
         filtered: list[Detection] = []
         for detection in detections:
             if detection.class_id != 0 or detection.label != "person":
@@ -327,7 +413,9 @@ class ProcessingPipeline(Thread):
             filtered.append(detection)
         return filtered
 
-    def _filter_live_count_tracks(self, tracks: list[TrackedObject], frame_width: int, frame_height: int) -> list[TrackedObject]:
+    def _filter_live_count_tracks(
+        self, tracks: list[TrackedObject], frame_width: int, frame_height: int
+    ) -> list[TrackedObject]:
         return [
             track
             for track in tracks
@@ -338,14 +426,26 @@ class ProcessingPipeline(Thread):
         ]
 
     def _bbox_is_person_like(self, bbox, frame_width: int, frame_height: int) -> bool:
-        if bbox.area < max(self.config.tracking.minimum_bbox_area, self.config.identity.live_min_bbox_area):
+        if bbox.area < max(
+            self.config.tracking.minimum_bbox_area,
+            self.config.identity.live_min_bbox_area,
+        ):
             return False
         if bbox.width < 8 or bbox.height < 24:
             return False
-        if bbox.x2 <= 0 or bbox.y2 <= 0 or bbox.x1 >= frame_width or bbox.y1 >= frame_height:
+        if (
+            bbox.x2 <= 0
+            or bbox.y2 <= 0
+            or bbox.x1 >= frame_width
+            or bbox.y1 >= frame_height
+        ):
             return False
         aspect_ratio = bbox.width / max(bbox.height, 1.0)
-        return self.config.identity.live_min_aspect_ratio <= aspect_ratio <= self.config.identity.live_max_aspect_ratio
+        return (
+            self.config.identity.live_min_aspect_ratio
+            <= aspect_ratio
+            <= self.config.identity.live_max_aspect_ratio
+        )
 
     def _restore_counts(self) -> None:
         restored = self.database.restore_counts()
@@ -355,6 +455,7 @@ class ProcessingPipeline(Thread):
         self.global_counts.timeouts = restored["timeouts"]
         self.global_counts.uncertain_consensus = restored["uncertain"]
         self.global_counts.suppressed_duplicates = restored["suppressed"]
+        self.global_counts.wrong_way = restored["wrong_way"]
         self.runtime_stats.timeouts = restored["timeouts"]
 
     def _restore_inside_only(self) -> None:
@@ -370,7 +471,9 @@ class ProcessingPipeline(Thread):
             self._last_retention_purge_at = now
         if not self.config.timeout.presence_timeout_enabled:
             return
-        result = self.database.close_timed_out_sessions(self.config.timeout.presence_timeout_minutes)
+        result = self.database.close_timed_out_sessions(
+            self.config.timeout.presence_timeout_minutes
+        )
         if result.closed_sessions:
             self.global_counts.timeouts += result.closed_sessions
             self._restore_inside_only()
@@ -398,9 +501,11 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.hailo_inference_count = self.hailo.inference_count
             if detections:
                 self.runtime_stats.last_detection_at = monotonic()
-            
+
             if detections:
-                LOGGER.debug("DETECTION camera=%s count=%s", packet.camera_id, len(detections))
+                LOGGER.debug(
+                    "DETECTION camera=%s count=%s", packet.camera_id, len(detections)
+                )
             return detections
         except HailoUnavailableError as exc:
             self.runtime_stats.hailo_status = str(exc)
@@ -411,12 +516,34 @@ class ProcessingPipeline(Thread):
         image = packet.image.copy()
         camera_config = self.config.cameras[packet.camera_id]
         role_text = "EINGANG" if camera_config.role == "entrance" else "AUSGANG"
-        event_text = "EINTRITT +1" if camera_config.role == "entrance" else "AUSTRITT -1"
+        event_text = (
+            "EINTRITT +1" if camera_config.role == "entrance" else "AUSTRITT -1"
+        )
         cv2.rectangle(image, (0, 0), (330, 78), (0, 0, 0), -1)
-        cv2.putText(image, role_text, (18, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(image, event_text, (18, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 255, 255), 2, cv2.LINE_AA)
-        cv2.line(image, camera_config.line_start, camera_config.line_end, (0, 220, 255), 2)
-        
+        cv2.putText(
+            image,
+            role_text,
+            (18, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.85,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            image,
+            event_text,
+            (18, 62),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.72,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.line(
+            image, camera_config.line_start, camera_config.line_end, (0, 220, 255), 2
+        )
+
         # Draw Zone A and Zone B boundary lines based on normal vector and hysteresis
         ax, ay = camera_config.line_start
         bx, by = camera_config.line_end
@@ -425,14 +552,14 @@ class ProcessingPipeline(Thread):
             nx = -(by - ay) / line_length
             ny = (bx - ax) / line_length
             d = self.config.tracking.zone_hysteresis_pixels
-            
+
             # Boundary A (distance < -d)
             ax_a = int(ax + nx * (-d))
             ay_a = int(ay + ny * (-d))
             bx_a = int(bx + nx * (-d))
             by_a = int(by + ny * (-d))
             cv2.line(image, (ax_a, ay_a), (bx_a, by_a), (0, 0, 255), 1, cv2.LINE_AA)
-            
+
             # Boundary B (distance > d)
             ax_b = int(ax + nx * d)
             ay_b = int(ay + ny * d)
@@ -442,14 +569,20 @@ class ProcessingPipeline(Thread):
 
         for track in tracks:
             box = track.bbox
-            cv2.rectangle(image, (int(box.x1), int(box.y1)), (int(box.x2), int(box.y2)), (0, 255, 120), 2)
-            
+            cv2.rectangle(
+                image,
+                (int(box.x1), int(box.y1)),
+                (int(box.x2), int(box.y2)),
+                (0, 255, 120),
+                2,
+            )
+
             counter = self.counters[packet.camera_id]
             memory = counter._tracks.get(track.track_id)
             zone_text = memory.stable_zone if memory else "neutral"
             counted_text = "ja" if (memory and memory.counted) else "nein"
             dir_text = "IN" if camera_config.role == "entrance" else "OUT"
-            
+
             label = f"ID:{track.track_id} Z:{zone_text} R:{dir_text} C:{counted_text}"
             cv2.putText(
                 image,
@@ -462,7 +595,10 @@ class ProcessingPipeline(Thread):
                 cv2.LINE_AA,
             )
         if self.config.privacy.enabled:
-            if not self.config.display.show_camera_preview and not self.config.privacy.video_stream_enabled:
+            if (
+                not self.config.display.show_camera_preview
+                and not self.config.privacy.video_stream_enabled
+            ):
                 return hidden_preview(image)
             return anonymize_frame(
                 image,
@@ -475,10 +611,17 @@ class ProcessingPipeline(Thread):
     def _emit_stats(self) -> None:
         if self.stats_callback:
             self.stats_callback(self.runtime_stats, self.global_counts)
-            
+
             # Log GUI_COUNTER_UPDATE periodically (once per second)
             now = monotonic()
-            if not hasattr(self, "_last_gui_log_time") or now - self._last_gui_log_time >= 1.0:
-                LOGGER.info("GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
-                            self.global_counts.inside, self.global_counts.entered, self.global_counts.exited)
+            if (
+                not hasattr(self, "_last_gui_log_time")
+                or now - self._last_gui_log_time >= 1.0
+            ):
+                LOGGER.info(
+                    "GUI_COUNTER_UPDATE global_inside=%s global_entries=%s global_exits=%s",
+                    self.global_counts.inside,
+                    self.global_counts.entered,
+                    self.global_counts.exited,
+                )
                 self._last_gui_log_time = now

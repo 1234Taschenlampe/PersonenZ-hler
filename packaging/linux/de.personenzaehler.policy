@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>PersonenZähler</vendor>
+  <vendor_url>https://github.com/1234Taschenlampe/PersonenZ-hler</vendor_url>
+  <action id="de.personenzaehler.administer">
+    <description>Administer protected PersonenZähler components</description>
+    <description xml:lang="de">Geschützte PersonenZähler-Komponenten verwalten</description>
+    <message>Authentication is required to administer PersonenZähler.</message>
+    <message xml:lang="de">Zum Verwalten geschützter PersonenZähler-Komponenten ist eine Systembestätigung erforderlich.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/personenzaehler/personenzaehler-admin</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

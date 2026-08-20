@@ -10,6 +10,7 @@ from time import sleep, time
 from .camera_manager import CameraCapture, LatestFrameHub, camera_source_kind
 from .configuration import load_config, privacy_readiness_errors
 from .counter import GlobalCounts
+from .diagnostics import redact_sensitive
 from .enhanced_counting import EnhancedProcessingPipeline
 from .license_guard import LicenseError, enforce_license
 from .logging_setup import configure_logging
@@ -28,7 +29,11 @@ class VisitorCounterService:
     """
 
     def __init__(self, project_root: Path | RuntimePaths) -> None:
-        self.paths = project_root if isinstance(project_root, RuntimePaths) else RuntimePaths.discover(project_root)
+        self.paths = (
+            project_root
+            if isinstance(project_root, RuntimePaths)
+            else RuntimePaths.discover(project_root)
+        )
         self.project_root = self.paths.project_root
         self.config = load_config(self.paths.config_file)
         self.stop_event = Event()
@@ -68,9 +73,15 @@ class VisitorCounterService:
                 LOGGER.error("STARTUP_BLOCKED %s", error)
             return 2
 
-        missing = [camera.camera_id for camera in self.config.cameras.values() if not camera.device]
+        missing = [
+            camera.camera_id
+            for camera in self.config.cameras.values()
+            if not camera.device
+        ]
         if missing:
-            LOGGER.error("STARTUP_BLOCKED camera sources missing: %s", ", ".join(missing))
+            LOGGER.error(
+                "STARTUP_BLOCKED camera sources missing: %s", ", ".join(missing)
+            )
             return 3
 
         for capture in self.captures:
@@ -110,12 +121,16 @@ class VisitorCounterService:
                     "status": cs.state,
                     "actual_fps": round(cs.fps, 1),
                     "last_frame_time": cs.last_frame_time,
-                    "seconds_since_last_frame": None if cs.last_frame_time is None else round(now - cs.last_frame_time, 3),
-                    "connected_seconds": None if cs.connected_since is None or not cs.connected else round(now - cs.connected_since, 1),
+                    "seconds_since_last_frame": None
+                    if cs.last_frame_time is None
+                    else round(now - cs.last_frame_time, 3),
+                    "connected_seconds": None
+                    if cs.connected_since is None or not cs.connected
+                    else round(now - cs.connected_since, 1),
                     "reconnect_count": cs.reconnect_count,
                     "dropped_frames": cs.dropped_frames,
                     "decode_errors": cs.decode_errors,
-                    "last_error": cs.last_error,
+                    "last_error": redact_sensitive(cs.last_error),
                     "visible": self.pipeline.counters[camera.camera_id].counts.visible,
                     "entered": self.pipeline.counters[camera.camera_id].counts.entered,
                     "exited": self.pipeline.counters[camera.camera_id].counts.exited,
@@ -159,7 +174,7 @@ class VisitorCounterService:
         tmp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
         tmp.replace(self.live_status_path)
         try:
-            self.live_status_path.chmod(0o600)
+            self.live_status_path.chmod(0o644)
         except OSError:
             pass
 
@@ -171,7 +186,9 @@ def main() -> int:
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--system-layout", action="store_true")
     args = parser.parse_args()
-    paths = RuntimePaths.discover(args.project_root.resolve(), system_layout=args.system_layout)
+    paths = RuntimePaths.discover(
+        args.project_root.resolve(), system_layout=args.system_layout
+    )
     configure_logging(paths.log_dir)
     service = VisitorCounterService(paths)
 

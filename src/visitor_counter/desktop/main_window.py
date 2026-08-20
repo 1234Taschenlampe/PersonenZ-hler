@@ -30,7 +30,9 @@ from ..diagnostics import (
     redact_sensitive,
 )
 from ..license_guard import LicenseError
+from ..model_installation import ModelInstallationService
 from ..runtime_paths import RuntimePaths
+from ..security_assets import SecurityAssetService
 from ..settings_service import SettingsError, SettingsService
 from .pages import (
     AboutPage,
@@ -53,8 +55,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.paths = paths
         self.paths.ensure_user_directories()
-        self.settings_service = SettingsService(paths.config_file)
+        self.settings_service = SettingsService(
+            paths.config_file, allow_privileged=paths.system_layout
+        )
         self.application_service = ApplicationService(paths)
+        self.model_installation = ModelInstallationService(paths)
+        self.security_assets = SecurityAssetService(paths)
         self.thread_pool = QThreadPool.globalInstance()
         self._workers: set[FunctionWorker] = set()
         self._refreshing = False
@@ -156,16 +162,19 @@ class MainWindow(QMainWindow):
         cameras.test_requested.connect(self._test_camera)
         hardware: HardwarePage = self.pages["KI & Hardware"]  # type: ignore[assignment]
         hardware.diagnose_requested.connect(self._run_diagnostics)
+        hardware.model_import_requested.connect(self._import_model)
         system: SystemPage = self.pages["System"]  # type: ignore[assignment]
         system.service_action_requested.connect(self._service_action)
         system.logs_requested.connect(self._load_logs)
         system.diagnostic_export_requested.connect(self._export_diagnostics)
+        system.pairing_export_requested.connect(self._export_pairing)
         privacy: PrivacyPage = self.pages["Datenschutz"]  # type: ignore[assignment]
         privacy.save_requested.connect(self._save_values)
         privacy.delete_requested.connect(self._delete_personal_data)
         privacy.license_import_requested.connect(self._import_license)
         settings: SettingsPage = self.pages["Einstellungen"]  # type: ignore[assignment]
         settings.save_requested.connect(self._save_values)
+        settings.security_asset_import_requested.connect(self._import_security_asset)
 
     def _select_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
@@ -289,7 +298,46 @@ class MainWindow(QMainWindow):
         page: HardwarePage = self.pages["KI & Hardware"]  # type: ignore[assignment]
         page.details.setPlainText("Hardwareprüfung läuft …")
         self._run_worker(
-            lambda: collect_diagnostics(self.paths.project_root), page.set_report
+            lambda: collect_diagnostics(
+                self.paths.project_root,
+                config_file=self.paths.config_file,
+                output_dir=self.paths.log_dir,
+            ),
+            page.set_report,
+        )
+
+    def _import_model(self, kind: str, source: Path) -> None:
+        self.global_status.setText("Modell wird sicher importiert …")
+
+        def completed(model: Any) -> None:
+            QMessageBox.information(
+                self,
+                "Modell importiert",
+                f"{model.path.name} wurde installiert. Führen Sie jetzt die Hardwareprüfung aus.",
+            )
+            self._run_diagnostics()
+
+        self._run_worker(
+            lambda: self.model_installation.install(kind, source), completed
+        )
+
+    def _import_security_asset(self, kind: str, source: Path) -> None:
+        def completed(target: Path) -> None:
+            field = (
+                "api.tls_certificate"
+                if kind == "certificate"
+                else "api.tls_private_key"
+            )
+            self._save_values({field: str(target)})
+            QMessageBox.information(
+                self,
+                "TLS-Datei importiert",
+                "Die geschützte TLS-Datei wurde installiert. Starten Sie den API-Dienst über die Systemseite neu.",
+            )
+
+        self._run_worker(
+            lambda: self.security_assets.install_tls_asset(kind, source),
+            completed,
         )
 
     def _service_action(self, action: str) -> None:
@@ -324,6 +372,25 @@ class MainWindow(QMainWindow):
             ),
             lambda path: QMessageBox.information(
                 self, "Diagnosepaket erstellt", f"Gespeichert unter:\n{path}"
+            ),
+        )
+
+    def _export_pairing(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Android-Pairing speichern",
+            str(Path.home() / "personenzaehler-pairing.json"),
+            "Pairing-Datei (*.json)",
+        )
+        if not filename:
+            return
+        config = self.settings_service.load()
+        self._run_worker(
+            lambda: self.security_assets.export_pairing(config, Path(filename)),
+            lambda path: QMessageBox.information(
+                self,
+                "Pairing-Datei erstellt",
+                f"Die Datei enthält einen geheimen Viewer-Token. Übertragen Sie sie geschützt und löschen Sie sie danach.\n\n{path}",
             ),
         )
 

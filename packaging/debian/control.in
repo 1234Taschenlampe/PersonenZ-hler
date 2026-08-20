@@ -1,0 +1,14 @@
+Package: personenzaehler
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: PersonenZähler Project <noreply@example.invalid>
+Depends: adduser, desktop-file-utils, shared-mime-info, python3 (>= 3.11), python3-numpy, python3-opencv, python3-psutil, python3-yaml, python3-cryptography, python3-pyside6.qtcore, python3-pyside6.qtgui, python3-pyside6.qtwidgets, pkexec, polkitd
+Recommends: v4l-utils, avahi-daemon
+Suggests: hailort, hailo-all
+Description: Native Hailo-accelerated dual-camera people counter
+ PersonenZähler is a privacy-oriented native Linux desktop suite for a
+ Raspberry Pi 5 with Hailo-10H, YOLO26m and two local or network cameras.
+ It includes a first-run wizard, service management, diagnostics, a local API,
+ signed license verification and privacy-preserving aggregate statistics.

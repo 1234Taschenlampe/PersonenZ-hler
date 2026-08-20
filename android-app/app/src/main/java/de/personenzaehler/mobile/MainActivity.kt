@@ -240,6 +240,9 @@ private fun DashboardScreen(state: MobileUiState) {
                 listOf(
                     "Eintritte gesamt" to formatInt(status?.counts?.entered),
                     "Austritte gesamt" to formatInt(status?.counts?.exited),
+                    "Besucher heute" to formatInt(status?.counts?.dailyUnique),
+                    "Gesamtdurchfluss" to formatInt(status?.counts?.throughput),
+                    "Fehlrichtungen" to formatInt(status?.counts?.wrongWay),
                     "Sichtbar global" to formatInt(status?.counts?.visible),
                     "Suppressed" to formatInt(status?.counts?.suppressed),
                     "Uncertain" to formatInt(status?.counts?.uncertain),
