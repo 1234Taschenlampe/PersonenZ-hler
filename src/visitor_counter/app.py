@@ -4,7 +4,6 @@ import argparse
 import hashlib
 from pathlib import Path
 
-from .license_guard import LicenseError, enforce_license
 from .synthetic_test import run_synthetic_counter_test
 
 
@@ -24,7 +23,26 @@ def get_db_sha256(db_path: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="YOLO26m dual-camera visitor counter")
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--test-global-counter", action="store_true", help="Run the synthetic global counter validation test")
+    parser.add_argument(
+        "--test-global-counter",
+        action="store_true",
+        help="Run the synthetic global counter validation test",
+    )
+    parser.add_argument(
+        "--system-layout",
+        action="store_true",
+        help="Use /etc, /var/lib, /var/log and /var/cache installation paths",
+    )
+    parser.add_argument(
+        "--no-wizard",
+        action="store_true",
+        help="Do not open the first-run wizard automatically",
+    )
+    parser.add_argument(
+        "--legacy-embedded",
+        action="store_true",
+        help="Run the legacy embedded camera GUI (development only)",
+    )
     args = parser.parse_args()
 
     project_root = args.project_root.resolve()
@@ -40,18 +58,26 @@ def main() -> int:
         else:
             print("WARNING: Production database was modified during the test!")
         return result
-    try:
-        enforce_license(project_root)
-    except LicenseError as exc:
-        print(f"Start blockiert: {exc}")
-        return 4
+    if args.legacy_embedded:
+        from .license_guard import LicenseError, enforce_license
 
-    from . import gui as gui_module
-    from .enhanced_counting import EnhancedProcessingPipeline, install_enhanced_gui
+        try:
+            enforce_license(project_root)
+        except LicenseError as exc:
+            print(f"Start blockiert: {exc}")
+            return 4
+        from . import gui as gui_module
+        from .enhanced_counting import EnhancedProcessingPipeline, install_enhanced_gui
 
-    gui_module.ProcessingPipeline = EnhancedProcessingPipeline
-    install_enhanced_gui(gui_module)
-    return gui_module.run_gui(project_root)
+        gui_module.ProcessingPipeline = EnhancedProcessingPipeline
+        install_enhanced_gui(gui_module)
+        return gui_module.run_gui(project_root)
+
+    from .desktop import run_desktop
+    from .runtime_paths import RuntimePaths
+
+    paths = RuntimePaths.discover(project_root, system_layout=args.system_layout)
+    return run_desktop(paths, show_wizard=not args.no_wizard)
 
 
 if __name__ == "__main__":
