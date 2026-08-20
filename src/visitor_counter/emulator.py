@@ -4,7 +4,6 @@ import argparse
 import json
 from dataclasses import dataclass, field, replace
 from math import cos, sin
-from pathlib import Path
 from random import Random
 from typing import Iterable
 

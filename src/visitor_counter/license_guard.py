@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import socket
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -160,7 +160,12 @@ def _fetch_online_document(url: str, timeout_seconds: float) -> bytes:
         raise LicenseError("GitHub-Lizenzcheck ist nicht erreichbar") from exc
 
 
-def evaluate_license(project_root: Path) -> LicenseDecision:
+def evaluate_license(
+    project_root: Path,
+    *,
+    license_path: Path | None = None,
+    public_key_path: Path | None = None,
+) -> LicenseDecision:
     """Validate local signed license and, by default, a matching GitHub entitlement.
 
     Production defaults are fail-closed. Development can explicitly opt out with
@@ -172,8 +177,10 @@ def evaluate_license(project_root: Path) -> LicenseDecision:
     if not required:
         return LicenseDecision(True, "Lizenzprüfung wurde explizit für Entwicklung deaktiviert", machine_fingerprint=fingerprint)
 
-    license_path = project_root / os.environ.get("VISITOR_COUNTER_LICENSE_FILE", "config/license.json")
-    public_key_path = project_root / os.environ.get("VISITOR_COUNTER_LICENSE_PUBLIC_KEY", "config/license_public_key.pem")
+    license_path = license_path or project_root / os.environ.get("VISITOR_COUNTER_LICENSE_FILE", "config/license.json")
+    public_key_path = public_key_path or project_root / os.environ.get(
+        "VISITOR_COUNTER_LICENSE_PUBLIC_KEY", "config/license_public_key.pem"
+    )
     public_key = _load_public_key(public_key_path)
     try:
         local_raw = license_path.read_bytes()
@@ -201,8 +208,13 @@ def evaluate_license(project_root: Path) -> LicenseDecision:
     return LicenseDecision(True, "Lokale Lizenz und GitHub-Freischaltung sind gültig", license_id, fingerprint, True)
 
 
-def enforce_license(project_root: Path) -> LicenseDecision:
-    decision = evaluate_license(project_root)
+def enforce_license(
+    project_root: Path,
+    *,
+    license_path: Path | None = None,
+    public_key_path: Path | None = None,
+) -> LicenseDecision:
+    decision = evaluate_license(project_root, license_path=license_path, public_key_path=public_key_path)
     if not decision.allowed:
         raise LicenseError(decision.reason)
     return decision

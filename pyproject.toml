@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "visitor-counter"
-version = "0.1.0"
-description = "Dual-camera YOLO26m Hailo visitor counter for Raspberry Pi"
+version = "1.0.0"
+description = "Native Linux desktop suite for a dual-camera YOLO26m Hailo visitor counter"
 requires-python = ">=3.11"
 dependencies = [
   "cryptography>=44.0",
@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 visitor-counter = "visitor_counter.app:main"
+visitor-counter-service = "visitor_counter.service:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

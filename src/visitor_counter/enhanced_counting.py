@@ -40,7 +40,9 @@ class DailyUniqueStore:
         self.threshold = float(config.identity.reid_threshold if threshold is None else threshold)
         self.threshold = max(0.50, min(0.99, self.threshold))
         self.protector = protector if protector is not None else load_data_protector(config.database, project_root)
-        self.path = project_root / "data" / "daily_unique.sqlite3"
+        configured_database = Path(config.database.path).expanduser()
+        data_dir = configured_database.parent if configured_database.is_absolute() else project_root / "data"
+        self.path = data_dir / "daily_unique.sqlite3"
         self._profiles: dict[int, tuple[float, ...]] = {}
         self._fallback_ids: set[int] = set()
         self._day = self._local_day(time())
@@ -253,8 +255,7 @@ class _ConsensusObserver:
 
     def decide(self, event: CrossingEvent) -> ConsensusDecision:
         decision = self._delegate.decide(event)
-        if event.global_person_id is not None and decision.counted and not decision.uncertain:
-            self._callback(event, decision)
+        self._callback(event, decision)
         return decision
 
     def reset(self) -> None:
@@ -301,7 +302,12 @@ class EnhancedProcessingPipeline(ProcessingPipeline):
                 del self._latest_embeddings_by_global_id[key]
 
     def _apply_confirmed_crossing(self, event: CrossingEvent, decision: ConsensusDecision) -> None:
-        _ = decision
+        if event.global_person_id is None or decision.uncertain:
+            self.global_counts.uncertain_consensus += 1
+            return
+        if not decision.counted:
+            self.global_counts.suppressed_duplicates += 1
+            return
         if event.direction is Direction.IN:
             self.global_counts.entered += 1
             self.global_counts.inside += 1

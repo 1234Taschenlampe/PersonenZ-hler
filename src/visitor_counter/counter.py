@@ -234,6 +234,13 @@ class GlobalCounts:
     suppressed_duplicates: int = 0
     uncertain_consensus: int = 0
     timeouts: int = 0
+    daily_unique: int = 0
+    daily_unique_degraded: bool = True
+    wrong_way: int = 0
+
+    @property
+    def throughput(self) -> int:
+        return self.entered + self.exited
 
     def apply(self, direction: Direction, counted: bool, uncertain: bool) -> None:
         if not counted:

@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 import signal
+from pathlib import Path
 from threading import Event
 from time import sleep, time
 
 from .camera_manager import CameraCapture, LatestFrameHub, camera_source_kind
 from .configuration import load_config, privacy_readiness_errors
 from .counter import GlobalCounts
+from .enhanced_counting import EnhancedProcessingPipeline
 from .license_guard import LicenseError, enforce_license
 from .logging_setup import configure_logging
-from .production_pipeline import ProductionProcessingPipeline
+from .runtime_paths import RuntimePaths
 from .types import RuntimeStats
 
 LOGGER = logging.getLogger(__name__)
@@ -26,19 +27,20 @@ class VisitorCounterService:
     two display clients consume status through the existing API.
     """
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = project_root
-        self.config = load_config(project_root / "config" / "config.yaml")
+    def __init__(self, project_root: Path | RuntimePaths) -> None:
+        self.paths = project_root if isinstance(project_root, RuntimePaths) else RuntimePaths.discover(project_root)
+        self.project_root = self.paths.project_root
+        self.config = load_config(self.paths.config_file)
         self.stop_event = Event()
         self.frame_hub = LatestFrameHub(list(self.config.cameras))
         self.captures = [
             CameraCapture(camera, self.frame_hub, self.stop_event)
             for camera in self.config.cameras.values()
         ]
-        self.live_status_path = project_root / "data" / "live_status.json"
-        self.pipeline = ProductionProcessingPipeline(
+        self.live_status_path = self.paths.live_status_file
+        self.pipeline = EnhancedProcessingPipeline(
             self.config,
-            project_root,
+            self.project_root,
             self.frame_hub,
             self.stop_event,
             stats_callback=self._on_stats,
@@ -46,7 +48,11 @@ class VisitorCounterService:
 
     def run(self) -> int:
         try:
-            license_decision = enforce_license(self.project_root)
+            license_decision = enforce_license(
+                self.project_root,
+                license_path=self.paths.license_file,
+                public_key_path=self.paths.license_public_key,
+            )
         except LicenseError as exc:
             LOGGER.error("STARTUP_BLOCKED license: %s", exc)
             return 4
@@ -125,6 +131,10 @@ class VisitorCounterService:
                 "visible": stats.global_visible,
                 "suppressed": counts.suppressed_duplicates,
                 "uncertain": counts.uncertain_consensus,
+                "daily_unique": counts.daily_unique,
+                "daily_unique_degraded": counts.daily_unique_degraded,
+                "throughput": counts.throughput,
+                "wrong_way": counts.wrong_way,
                 "last_event_time": stats.last_detection_at,
             },
             "cameras": cameras,
@@ -155,9 +165,15 @@ class VisitorCounterService:
 
 
 def main() -> int:
-    project_root = Path.cwd().resolve()
-    configure_logging(project_root / "logs")
-    service = VisitorCounterService(project_root)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PersonenZähler background service")
+    parser.add_argument("--project-root", type=Path, default=Path.cwd())
+    parser.add_argument("--system-layout", action="store_true")
+    args = parser.parse_args()
+    paths = RuntimePaths.discover(args.project_root.resolve(), system_layout=args.system_layout)
+    configure_logging(paths.log_dir)
+    service = VisitorCounterService(paths)
 
     def request_stop(_signum: int, _frame: object) -> None:
         service.stop()

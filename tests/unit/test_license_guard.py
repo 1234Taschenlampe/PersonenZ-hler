@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
