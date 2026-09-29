@@ -54,7 +54,7 @@ class StatusBadge(QLabel):
     def set_state(self, state: str, text: str | None = None) -> None:
         background, foreground = self._COLORS.get(state, self._COLORS["neutral"])
         self.setStyleSheet(
-            f"background:{background};color:{foreground};padding:5px 10px;border-radius:10px;font-weight:600;"
+            f"background:{background};color:{foreground};padding:3px 7px;border-radius:4px;font-weight:600;"
         )
         if text is not None:
             self.setText(text)

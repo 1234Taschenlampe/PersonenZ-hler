@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
@@ -46,6 +47,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -171,12 +175,13 @@ private enum class Screen(val route: String, val label: String, val icon: ImageV
 @Composable
 private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
     val navController = rememberNavController()
+    var moreOpen by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Personenzaehler")
+                        Text("PersonenZähler")
                         Text(
                             text = if (state.connection.restConnected) "REST verbunden" else "REST getrennt",
                             style = MaterialTheme.typography.bodySmall,
@@ -185,6 +190,19 @@ private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
                     }
                 },
                 actions = {
+                    Box {
+                        IconButton(onClick = { moreOpen = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Weitere Bereiche")
+                        }
+                        DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                            listOf(Screen.History, Screen.Settings).forEach { screen ->
+                                DropdownMenuItem(text = { Text(screen.label) }, onClick = {
+                                    moreOpen = false
+                                    navController.navigate(screen.route) { launchSingleTop = true }
+                                })
+                            }
+                        }
+                    }
                     OutlinedButton(onClick = viewModel::testConnection, modifier = Modifier.padding(end = 8.dp)) {
                         Icon(Icons.Default.Refresh, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
@@ -197,12 +215,12 @@ private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
             NavigationBar {
                 val backStack by navController.currentBackStackEntryAsState()
                 val current = backStack?.destination
-                Screen.entries.forEach { screen ->
+                listOf(Screen.Dashboard, Screen.Cameras, Screen.Events, Screen.System).forEach { screen ->
                     NavigationBarItem(
                         selected = current?.hierarchy?.any { it.route == screen.route } == true,
                         onClick = { navController.navigate(screen.route) { launchSingleTop = true } },
                         icon = { Icon(screen.icon, contentDescription = screen.label) },
-                        label = { Text(screen.label, fontSize = 10.sp) },
+                        label = { Text(screen.label) },
                     )
                 }
             }
@@ -231,55 +249,36 @@ private fun DashboardScreen(state: MobileUiState) {
                 Column(Modifier.padding(18.dp)) {
                     Text("Aktuell anwesend", style = MaterialTheme.typography.titleMedium)
                     Text(formatInt(status?.counts?.inside), fontSize = 56.sp, fontWeight = FontWeight.Bold)
-                    Text("Letzte Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
                 }
             }
         }
+        item { SectionTitle("Zählung heute") }
         item {
-            MetricGrid(
-                listOf(
-                    "Eintritte gesamt" to formatInt(status?.counts?.entered),
-                    "Austritte gesamt" to formatInt(status?.counts?.exited),
-                    "Besucher heute" to formatInt(status?.counts?.dailyUnique),
-                    "Gesamtdurchfluss" to formatInt(status?.counts?.throughput),
-                    "Fehlrichtungen" to formatInt(status?.counts?.wrongWay),
-                    "Sichtbar global" to formatInt(status?.counts?.visible),
-                    "Suppressed" to formatInt(status?.counts?.suppressed),
-                    "Uncertain" to formatInt(status?.counts?.uncertain),
-                    "Letztes Ereignis" to formatEpochSeconds(status?.counts?.lastEventTime),
-                    "App-Laufzeit" to "N/A",
-                    "System-Uptime" to formatDuration(status?.host?.systemUptimeSeconds),
-                    "Datenbank" to if (status?.database?.exists == true) "OK" else "N/A",
-                    "API" to (status?.api?.name ?: "N/A"),
-                    "Hailo" to when (status?.hailo?.deviceDetected) { true -> "OK"; false -> "nicht verfuegbar"; null -> "N/A" },
-                    "Serverversion" to state.serverVersionText,
-                ),
-            )
+            DetailList(listOf(
+                "Besucher heute" to formatInt(status?.counts?.dailyUnique),
+                "Eintritte" to formatInt(status?.counts?.entered),
+                "Austritte" to formatInt(status?.counts?.exited),
+                "Gesamtdurchfluss" to formatInt(status?.counts?.throughput),
+            ))
         }
     }
 }
 
 @Composable
 private fun StatusBanner(state: MobileUiState) {
+    val connection = state.connection
     val color = when {
-        !state.connection.restConnected -> MaterialTheme.colorScheme.errorContainer
-        state.connection.stale -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
+        !connection.restConnected -> MaterialTheme.colorScheme.errorContainer
+        connection.stale -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
     Card(colors = CardDefaults.cardColors(containerColor = color)) {
-        Column(Modifier.padding(14.dp)) {
-            Text(if (state.connection.restConnected) "Server verbunden" else "Keine Verbindung zum Server", fontWeight = FontWeight.Bold)
-            Text(state.connection.message)
-            Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
-            Text("WebSocket: ${state.connection.webSocketStatus}")
-            Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
-            Text("HTTP: ${state.connection.httpStatus ?: "N/A"} | Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
-            Text("Letzter REST-Erfolg: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
-            Text("Letzter WebSocket-Empfang: ${state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
-            Text("Handy-Netz: ${state.network.transport} ${state.network.ssid ?: ""} ${state.network.ipAddress ?: ""}".trim())
-            state.network.bssid?.let { Text("Access Point: $it") }
-            state.connection.lastError?.let { Text("REST-Fehler: $it", color = MaterialTheme.colorScheme.error) }
-            state.connection.webSocketError?.let { Text("WebSocket-Fehler: $it", color = MaterialTheme.colorScheme.error) }
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(if (connection.restConnected) "Verbunden" else "Getrennt", fontWeight = FontWeight.SemiBold)
+            Text("Server: ${state.settings.host}")
+            Text("Aktualisiert: ${connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "—"}")
+            if (connection.stale) Text("Daten sind möglicherweise veraltet")
+            if (!connection.restConnected) connection.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -333,7 +332,7 @@ private fun CamerasScreen(state: MobileUiState) {
             }
         }
         if (cameras.isEmpty()) {
-            item { EmptyCard("Keine Kameradaten verfuegbar.") }
+            item { EmptyCard("Keine Kameradaten verfügbar.") }
         }
         items(cameras) { camera ->
             CameraVideoCard(
@@ -360,10 +359,10 @@ private fun CameraVideoCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text(camera.name ?: camera.cameraId, fontWeight = FontWeight.Bold)
-                    Text("${camera.cameraId} | Rolle: ${camera.role ?: "N/A"} | Quelle: ${camera.source ?: "N/A"}")
+                    Text("${camera.cameraId} | Rolle: ${camera.role ?: "—"} | Quelle: ${camera.source ?: "—"}")
                 }
                 OutlinedButton(onClick = onSelect) {
-                    Text(if (large) "Schliessen" else "Gross")
+                    Text(if (large) "Schließen" else "Vergrößern")
                 }
             }
             if (settings.configured) {
@@ -383,7 +382,7 @@ private fun CameraVideoCard(
             } else {
                 EmptyCard("Serveradresse fehlt. Bitte in Einstellungen speichern.")
             }
-            Text("Status: ${camera.status ?: "N/A"} | Aufloesung: ${camera.width ?: "N/A"} x ${camera.height ?: "N/A"} | FPS Soll/Ist: ${camera.wantedFps ?: "N/A"} / ${formatDouble(camera.actualFps)}")
+            Text("Status: ${camera.status ?: "—"} | Auflösung: ${camera.width ?: "—"} x ${camera.height ?: "—"} | FPS Soll/Ist: ${camera.wantedFps ?: "—"} / ${formatDouble(camera.actualFps)}")
             Text("Letzter Frame: ${formatEpochSeconds(camera.lastFrameTime)} | seit ${formatDouble(camera.secondsSinceLastFrame, " s")}")
             Text("Sichtbar: ${formatInt(camera.visible)} | In: ${formatInt(camera.entered)} | Out: ${formatInt(camera.exited)}")
             Text("Verbunden: ${formatDuration(camera.connectedSeconds)} | Reconnects: ${formatInt(camera.reconnectCount)} | Verworfen: ${formatInt(camera.droppedFrames)}")
@@ -458,7 +457,7 @@ private fun EventsScreen(state: MobileUiState, onFilter: (EventFilter) -> Unit) 
                 }
             }
         }
-        if (filtered.isEmpty()) item { EmptyCard("Keine Ereignisse fuer diesen Filter.") }
+        if (filtered.isEmpty()) item { EmptyCard("Keine Ereignisse für diesen Filter.") }
         items(filtered) { event -> EventRow(event) }
     }
 }
@@ -468,27 +467,39 @@ private fun SystemScreen(status: ServerStatus?, state: MobileUiState) {
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { SectionTitle("System") }
         item {
-            MetricGrid(
+            DetailList(
                 listOf(
+                    "Fehlrichtungen" to formatInt(status?.counts?.wrongWay),
+                    "Global sichtbar" to formatInt(status?.counts?.visible),
+                    "Doppelzählungen verhindert" to formatInt(status?.counts?.suppressed),
+                    "Unsichere Ereignisse" to formatInt(status?.counts?.uncertain),
+                    "Letztes Ereignis" to formatEpochSeconds(status?.counts?.lastEventTime),
+                    "Datenbank" to if (status?.database?.exists == true) "Bereit" else "Nicht verfügbar",
+                    "API" to (status?.api?.name ?: "—"),
+                    "Serverversion" to state.serverVersionText,
                     "CPU" to formatDouble(status?.host?.cpuPercent, "%"),
-                    "Temperatur" to formatDouble(status?.host?.temperatureC, " C"),
+                    "Temperatur" to formatDouble(status?.host?.temperatureC, " °C"),
                     "RAM" to formatDouble(status?.host?.ramPercent, "%"),
                     "Swap" to formatDouble(status?.host?.swapPercent, "%"),
                     "Freier Speicher" to formatBytes(status?.host?.diskFreeBytes),
-                    "Load Average" to status?.host?.loadAverage?.joinToString(", ") { formatDouble(it) }.orEmpty().ifBlank { "N/A" },
-                    "System-Uptime" to formatDuration(status?.host?.systemUptimeSeconds),
-                    "DB-Groesse" to formatBytes(status?.database?.sizeBytes),
-                    "REST-Status" to if (state.connection.restConnected) "OK" else "Offline",
+                    "Systemlaufzeit" to formatDuration(status?.host?.systemUptimeSeconds),
+                    "Datenbankgröße" to formatBytes(status?.database?.sizeBytes),
+                    "REST-Status" to if (state.connection.restConnected) "Verbunden" else "Getrennt",
                     "WebSocket" to state.connection.webSocketStatus,
-                    "Handy-Netz" to listOfNotNull(state.network.transport, state.network.ssid, state.network.ipAddress).joinToString(" ").ifBlank { "N/A" },
-                    "Access Point" to (state.network.bssid ?: "N/A"),
-                    "Git-Commit" to (status?.version?.gitCommit ?: "N/A"),
-                    "Hailo erkannt" to when (status?.hailo?.deviceDetected) { true -> "ja"; false -> "nein"; null -> "N/A" },
+                    "Endpunkt" to (state.connection.endpoint ?: state.settings.baseUrl),
+                    "HTTP-Status" to (state.connection.httpStatus?.toString() ?: "—"),
+                    "Antwortzeit" to (state.connection.responseTimeMs?.let { "$it ms" } ?: "—"),
+                    "Letzter REST-Erfolg" to (state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "—"),
+                    "Letzter WebSocket-Empfang" to (state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "—"),
+                    "Handynetz" to listOfNotNull(state.network.transport, state.network.ssid, state.network.ipAddress).joinToString(" ").ifBlank { "—" },
+                    "Access Point" to (state.network.bssid ?: "—"),
+                    "Git-Commit" to (status?.version?.gitCommit ?: "—"),
+                    "Hailo erkannt" to yesNoNa(status?.hailo?.deviceDetected),
                     "Modell geladen" to yesNoNa(status?.runtime?.modelLoaded),
                     "Inferenz aktiv" to yesNoNa(status?.runtime?.inferenceActive),
                     "Inferenz-FPS" to formatDouble(status?.runtime?.inferenceFps),
                     "Hailo-Latenz" to formatDouble(status?.runtime?.hailoLatencyMs, " ms"),
-                    "Hailo-Status" to (status?.runtime?.hailoStatus ?: "N/A"),
+                    "Hailo-Status" to (status?.runtime?.hailoStatus ?: "—"),
                 ),
             )
         }
@@ -553,7 +564,7 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
             OutlinedButton(onClick = viewModel::testConnection) { Text("Verbindung testen") }
         }
         OutlinedButton(onClick = viewModel::discoverServers) {
-            Text(if (state.discoveryActive) "Suche laeuft..." else "Server automatisch suchen")
+            Text(if (state.discoveryActive) "Suche läuft..." else "Server automatisch suchen")
         }
         if (state.discoveredServers.isNotEmpty()) {
             Text("Gefundene Server")
@@ -571,19 +582,19 @@ private fun SettingsScreen(state: MobileUiState, viewModel: MainViewModel) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = viewModel::clearToken) { Text("Token entfernen") }
-            OutlinedButton(onClick = viewModel::clearLocalData) { Text("Lokale Daten loeschen") }
+            OutlinedButton(onClick = viewModel::clearLocalData) { Text("Lokale Daten löschen") }
         }
         Divider()
         Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
         Text("WebSocket: ${state.connection.webSocketStatus}")
         Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
-        Text("HTTP-Status: ${state.connection.httpStatus ?: "N/A"}")
-        Text("Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
-        Text("Letzter REST-Erfolg: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
-        Text("Letzter WebSocket-Empfang: ${state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
-        Text("Handy-Netz: ${state.network.transport} | verfuegbar=${state.network.available} | validiert=${state.network.validated}")
-        Text("SSID: ${state.network.ssid ?: "N/A"} | BSSID: ${state.network.bssid ?: "N/A"}")
-        Text("Handy-IP: ${state.network.ipAddress ?: "N/A"}")
+        Text("HTTP-Status: ${state.connection.httpStatus ?: "—"}")
+        Text("Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "—"}")
+        Text("Letzter REST-Erfolg: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "—"}")
+        Text("Letzter WebSocket-Empfang: ${state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "—"}")
+        Text("Handy-Netz: ${state.network.transport} | verfügbar=${state.network.available} | validiert=${state.network.validated}")
+        Text("SSID: ${state.network.ssid ?: "—"} | BSSID: ${state.network.bssid ?: "—"}")
+        Text("Handy-IP: ${state.network.ipAddress ?: "—"}")
         state.connection.lastError?.let { Text("Letzter REST-Fehler: $it", color = MaterialTheme.colorScheme.error) }
         state.connection.webSocketError?.let { Text("Letzter WebSocket-Fehler: $it", color = MaterialTheme.colorScheme.error) }
         Text("App-Version: ${state.appVersionText}")
@@ -602,23 +613,14 @@ private fun SettingSwitch(label: String, checked: Boolean, onCheckedChange: (Boo
 }
 
 @Composable
-private fun MetricGrid(items: List<Pair<String, String>>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                row.forEach { (label, value) -> MetricCard(label, value, Modifier.weight(1f)) }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
+private fun DetailList(items: List<Pair<String, String>>) {
+    Column(Modifier.fillMaxWidth()) {
+        items.forEachIndexed { index, (label, value) ->
+            if (index > 0) Divider()
+            Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, fontWeight = FontWeight.Medium)
             }
-        }
-    }
-}
-
-@Composable
-private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(12.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Text(value, fontWeight = FontWeight.Bold, fontSize = 20.sp)
         }
     }
 }
@@ -628,7 +630,7 @@ private fun ChartCard(title: String, values: List<Float>, unit: String = "") {
     Card {
         Column(Modifier.padding(14.dp)) {
             Text(title, fontWeight = FontWeight.Bold)
-            Text(if (unit.isBlank()) "Einheit: Personen/Zaehler" else "Einheit: $unit", style = MaterialTheme.typography.bodySmall)
+            Text(if (unit.isBlank()) "Einheit: Personen/Zähler" else "Einheit: $unit", style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(8.dp))
             SimpleLineChart(values)
         }
@@ -666,8 +668,8 @@ private fun EventRow(event: EventItem) {
     Card(shape = RoundedCornerShape(8.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(event.eventType ?: "Ereignis", fontWeight = FontWeight.Bold)
-            Text("${formatEpochSeconds(event.time)} | Kamera: ${event.cameraId ?: "N/A"} | Richtung: ${event.direction ?: "N/A"}")
-            Text("Konfidenz: ${formatDouble(event.confidence)} | counted=${event.counted ?: "N/A"} | uncertain=${event.uncertain ?: "N/A"}")
+            Text("${formatEpochSeconds(event.time)} | Kamera: ${event.cameraId ?: "—"} | Richtung: ${event.direction ?: "—"}")
+            Text("Konfidenz: ${formatDouble(event.confidence)} | gezählt=${event.counted ?: "—"} | unsicher=${event.uncertain ?: "—"}")
             event.description?.let { Text(it) }
         }
     }
@@ -686,5 +688,5 @@ private fun SectionTitle(title: String) {
 private fun yesNoNa(value: Boolean?): String = when (value) {
     true -> "ja"
     false -> "nein"
-    null -> "N/A"
+    null -> "—"
 }

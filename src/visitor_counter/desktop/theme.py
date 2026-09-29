@@ -42,12 +42,12 @@ def stylesheet(dark: bool) -> str:
     QWidget {{ color: {c["text"]}; }}
     QWidget#Sidebar {{ background: {c["surface"]}; border-right: 1px solid {c["border"]}; }}
     QWidget#TopBar {{ background: {c["window"]}; }}
-    QFrame[card='true'] {{ background: {c["surface"]}; border: 1px solid {c["border"]}; border-radius: 12px; }}
+    QFrame[card='true'] {{ background: {c["surface"]}; border: 1px solid {c["border"]}; border-radius: 5px; }}
     QLabel[muted='true'] {{ color: {c["muted"]}; }}
-    QLabel[title='true'] {{ font-size: 26px; font-weight: 600; }}
-    QLabel[metric='true'] {{ font-size: 30px; font-weight: 650; }}
-    QLabel[badge='true'] {{ padding: 5px 10px; border-radius: 10px; background: {c["surface_alt"]}; }}
-    QPushButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c["border"]}; border-radius: 8px; background: {c["surface"]}; }}
+    QLabel[title='true'] {{ font-size: 22px; font-weight: 600; }}
+    QLabel[metric='true'] {{ font-size: 26px; font-weight: 650; }}
+    QLabel[badge='true'] {{ padding: 5px 10px; border-radius: 4px; background: {c["surface_alt"]}; }}
+    QPushButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c["border"]}; border-radius: 5px; background: {c["surface"]}; }}
     QPushButton:hover {{ background: {c["surface_alt"]}; }}
     QPushButton:pressed {{ background: {c["border"]}; }}
     QPushButton[primary='true'] {{ color: white; background: {c["accent"]}; border-color: {c["accent"]}; font-weight: 600; }}
@@ -55,7 +55,7 @@ def stylesheet(dark: bool) -> str:
     QPushButton[nav='true'] {{ text-align: left; padding-left: 16px; min-height: 40px; border: none; background: transparent; }}
     QPushButton[nav='true']:checked {{ background: {c["surface_alt"]}; color: {c["accent"]}; font-weight: 600; }}
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTableWidget {{
-      min-height: 34px; padding: 2px 8px; border: 1px solid {c["border"]}; border-radius: 7px; background: {c["surface"]}; selection-background-color: {c["accent"]};
+      min-height: 34px; padding: 2px 8px; border: 1px solid {c["border"]}; border-radius: 5px; background: {c["surface"]}; selection-background-color: {c["accent"]};
     }}
     QTableWidget {{ gridline-color: {c["border"]}; }}
     QHeaderView::section {{ background: {c["surface_alt"]}; border: none; border-bottom: 1px solid {c["border"]}; padding: 8px; font-weight: 600; }}

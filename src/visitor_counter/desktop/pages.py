@@ -46,44 +46,55 @@ class OverviewPage(BasePage):
             "Übersicht",
             "Live-Status der Zählung und aller produktionskritischen Komponenten",
         )
-        grid = QGridLayout()
-        grid.setSpacing(12)
+        primary = Card()
+        primary_layout = QGridLayout(primary)
+        primary_layout.setContentsMargins(16, 12, 16, 12)
+        primary_layout.setSpacing(12)
         definitions = [
             ("inside", "Aktuell im Gebäude"),
             ("daily_unique", "Besucher heute"),
             ("entered", "Eintritte"),
             ("exited", "Austritte"),
             ("throughput", "Gesamtdurchfluss"),
-            ("suppressed", "Doppelzählungen verhindert"),
-            ("uncertain", "Unsichere Ereignisse"),
-            ("wrong_way", "Fehlrichtungen"),
         ]
         self.metrics: dict[str, MetricCard] = {}
         for index, (key, title) in enumerate(definitions):
-            card = MetricCard(title)
-            self.metrics[key] = card
-            grid.addWidget(card, index // 4, index % 4)
-        self.layout.addLayout(grid)
+            metric = MetricCard(title)
+            metric.setProperty("card", False)
+            self.metrics[key] = metric
+            primary_layout.addWidget(metric, 0, index)
+        self.layout.addWidget(primary)
 
-        health = Card()
+        self.layout.addWidget(QLabel("Zählqualität"))
+        secondary = QWidget()
+        secondary_layout = QGridLayout(secondary)
+        secondary_layout.setContentsMargins(0, 0, 0, 0)
+        self.secondary: dict[str, QLabel] = {}
+        for index, (key, title) in enumerate((
+            ("suppressed", "Doppelzählungen verhindert"),
+            ("uncertain", "Unsichere Ereignisse"),
+            ("wrong_way", "Fehlrichtungen"),
+        )):
+            secondary_layout.addWidget(QLabel(title), index, 0)
+            value = QLabel("—")
+            value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.secondary[key] = value
+            secondary_layout.addWidget(value, index, 1)
+        self.layout.addWidget(secondary)
+
+        self.layout.addWidget(QLabel("Systemzustand"))
+        health = QWidget()
         health_layout = QGridLayout(health)
-        health_layout.setContentsMargins(18, 16, 18, 16)
-        health_layout.setSpacing(12)
+        health_layout.setContentsMargins(0, 0, 0, 0)
+        health_layout.setVerticalSpacing(8)
         self.health: dict[str, StatusBadge] = {}
-        for index, title in enumerate(
-            (
-                "KI-Beschleuniger",
-                "Kameras",
-                "Datenbank",
-                "Hintergrunddienst",
-                "Lizenz",
-                "Datenschutz",
-            )
-        ):
+        for index, title in enumerate((
+            "KI-Beschleuniger", "Kameras", "Datenbank", "Hintergrunddienst", "Lizenz", "Datenschutz",
+        )):
             badge = StatusBadge()
             self.health[title] = badge
-            health_layout.addWidget(QLabel(title), index // 3 * 2, index % 3)
-            health_layout.addWidget(badge, index // 3 * 2 + 1, index % 3)
+            health_layout.addWidget(QLabel(title), index, 0)
+            health_layout.addWidget(badge, index, 1)
         self.layout.addWidget(health)
         self.updated = QLabel("Noch nicht aktualisiert")
         self.updated.setProperty("muted", True)
@@ -93,6 +104,8 @@ class OverviewPage(BasePage):
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
             card.set_value(snapshot.counts.get(key, 0))
+        for key, value in self.secondary.items():
+            value.setText(str(snapshot.counts.get(key, 0)))
         runtime_ready = str(snapshot.runtime.get("hailo_status", "")).lower() in {
             "ready",
             "ok",

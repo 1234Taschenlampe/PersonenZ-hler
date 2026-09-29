@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         top = QWidget()
         top.setObjectName("TopBar")
         top_layout = QHBoxLayout(top)
-        top_layout.setContentsMargins(28, 12, 28, 4)
+        top_layout.setContentsMargins(28, 8, 28, 0)
         self.global_status = QLabel("Status wird geladen …")
         self.global_status.setProperty("muted", True)
         refresh = QPushButton("Aktualisieren")
