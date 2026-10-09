@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from ..application_service import DashboardSnapshot
 from ..configuration import AppConfig
 from ..license_service import LicenseStatus
-from ..network_camera_discovery import reolink_rtsp_url
+from ..network_camera_discovery import RtspCandidate, reolink_rtsp_url
 from .components import Card, HistoryChart, MetricCard, PageHeader, StatusBadge
 
 
@@ -151,12 +151,12 @@ class CamerasPage(BasePage):
     def __init__(self) -> None:
         super().__init__(
             "Kameras",
-            "Quellen, Rollen und erwartete Bewegungsrichtungen ohne Konfigurationsdatei verwalten",
+            "Netzwerkkameras erkennen, Bildübertragung testen und Zählbereiche pro Kamera einstellen",
         )
         toolbar = QHBoxLayout()
-        discover = QPushButton("USB suchen")
+        discover = QPushButton("USB-Kameras suchen")
         discover.clicked.connect(self.discover_requested.emit)
-        network_scan = QPushButton("Netzwerk scannen")
+        network_scan = QPushButton("IP-Kameras suchen (RTSP + ONVIF)")
         network_scan.setProperty("primary", True)
         self.scan_subnet = QLineEdit()
         self.scan_subnet.setPlaceholderText("Automatisch oder 192.168.1.0/24")
@@ -167,7 +167,9 @@ class CamerasPage(BasePage):
         )
         save = QPushButton("Änderungen speichern")
         save.clicked.connect(self._emit_save)
-        self.discovery_status = QLabel("")
+        self.discovery_status = QLabel(
+            "Zwei Kameraplätze · Netzwerkgeräte auch ohne USB-Webcam möglich"
+        )
         self.discovery_status.setProperty("muted", True)
         toolbar.addWidget(network_scan)
         toolbar.addWidget(self.scan_subnet)
@@ -178,7 +180,7 @@ class CamerasPage(BasePage):
         self.layout.addLayout(toolbar)
         hint = QLabel(
             "RTSP-Kameras im eigenen LAN suchen oder die Kamera-IP manuell eingeben. "
-            "Der Scan findet erreichbare RTSP-Ports, aber keine Zugangsdaten. "
+            "ONVIF findet zusätzliche Kamerakandidaten, RTSP bestätigt nur einen Port, keine Videobilder. "
             "Bei getrennten Router-Netzen muss der Pi das Kamera-Subnetz erreichen."
         )
         hint.setWordWrap(True)
@@ -208,12 +210,23 @@ class CamerasPage(BasePage):
                 lambda _checked=False, cid=camera_id: self._apply_reolink(cid)
             )
             role = QComboBox()
-            role.addItem("Eingang", "entrance")
-            role.addItem("Ausgang", "exit")
+            role.addItem("Eingangsbereich", "entrance")
+            role.addItem("Ausgangsbereich", "exit")
             entry_direction = QComboBox()
-            entry_direction.addItems(["A_to_B", "B_to_A", "none"])
+            entry_direction.addItem("A → B bedeutet hinein", "A_to_B")
+            entry_direction.addItem("B → A bedeutet hinein", "B_to_A")
             exit_direction = QComboBox()
-            exit_direction.addItems(["B_to_A", "A_to_B", "none"])
+            exit_direction.addItem("B → A bedeutet hinaus", "B_to_A")
+            exit_direction.addItem("A → B bedeutet hinaus", "A_to_B")
+            entry_direction.currentIndexChanged.connect(
+                lambda _index, x=entry_direction, y=exit_direction:
+                    y.setCurrentIndex(max(0, y.findData(
+                        "B_to_A" if x.currentData() == "A_to_B" else "A_to_B"
+                    )))
+            )
+            counting_mode = QComboBox()
+            counting_mode.addItem("Linie/Seitenwechsel (empfohlen)", "line")
+            counting_mode.addItem("Erst am Bildrand nach Verschwinden", "exit_edge")
             status = StatusBadge()
             test = QPushButton("Verbindung testen")
             test.clicked.connect(lambda _checked=False, cid=camera_id: self._test(cid))
@@ -225,9 +238,19 @@ class CamerasPage(BasePage):
             form.addRow("Passwort", camera_password)
             form.addRow("Videoqualität", stream)
             form.addRow("", apply_ip)
-            form.addRow("Rolle", role)
-            form.addRow("Eintrittsrichtung", entry_direction)
-            form.addRow("Austrittsrichtung", exit_direction)
+            form.addRow("Kamera-Standort", role)
+            form.addRow("Welche Richtung führt ins Gebäude?", entry_direction)
+            form.addRow("Automatisch gegenläufiger Ausgang", exit_direction)
+            form.addRow("Wann wird gezählt?", counting_mode)
+            count_hint = QLabel(
+                "Beide Türen zählen in beide Richtungen: Rein = +1, raus = −1. "
+                "Im Bildrandmodus wird erst bei bestätigtem Seitenwechsel und "
+                "anschließendem Verschwinden am Bildrand gezählt. "
+                "Nur unsichtbar werden ist keine sichere Passage."
+            )
+            count_hint.setWordWrap(True)
+            count_hint.setProperty("muted", True)
+            form.addRow("", count_hint)
             form.addRow("", test)
             self.cards[camera_id] = {
                 "name": name,
@@ -239,6 +262,7 @@ class CamerasPage(BasePage):
                 "role": role,
                 "entry_direction": entry_direction,
                 "exit_direction": exit_direction,
+                "counting_mode": counting_mode,
                 "status": status,
             }
             self.layout.addWidget(card)
@@ -252,8 +276,12 @@ class CamerasPage(BasePage):
             self._select_source(source, camera.device or "")
             role: QComboBox = controls["role"]  # type: ignore[assignment]
             role.setCurrentIndex(max(0, role.findData(camera.role)))
-            controls["entry_direction"].setCurrentText(camera.entry_direction)  # type: ignore[attr-defined]
-            controls["exit_direction"].setCurrentText(camera.exit_direction)  # type: ignore[attr-defined]
+            entry: QComboBox = controls["entry_direction"]  # type: ignore[assignment]
+            entry.setCurrentIndex(max(0, entry.findData(camera.entry_direction)))
+            exits: QComboBox = controls["exit_direction"]  # type: ignore[assignment]
+            exits.setCurrentIndex(max(0, exits.findData(camera.exit_direction)))
+            mode: QComboBox = controls["counting_mode"]  # type: ignore[assignment]
+            mode.setCurrentIndex(max(0, mode.findData(camera.counting_mode)))
 
     @staticmethod
     def _source(combo: QComboBox) -> str:
@@ -293,17 +321,27 @@ class CamerasPage(BasePage):
                 if source and not any(combo.itemData(i) == source for i in range(combo.count())):
                     combo.addItem(source, source)
             self._select_source(combo, current)
-        self.discovery_status.setText(f"{len(sources)} USB-Videoquelle(n) gefunden")
+        self.discovery_status.setText(
+            f"USB-Suche: {len(sources)} lokale USB-Webcam(s). "
+            "Bereits konfigurierte RTSP-Kameras sind davon unabhängig."
+        )
 
-    def set_discovered_network(self, sources: list[str]) -> None:
+    def set_discovered_network(self, sources: list[RtspCandidate]) -> None:
         for controls in self.cards.values():
             combo: QComboBox = controls["source"]  # type: ignore[assignment]
-            for source in sources:
+            existing = self._source(combo)
+            for camera in sources:
+                source = camera.url_template
                 if not any(combo.itemData(i) == source for i in range(combo.count())):
-                    combo.addItem(source, source)
+                    combo.addItem(camera.label, source)
+            self._select_source(combo, existing)
         self.discovery_status.setText(
-            f"{len(sources)} RTSP-Kandidat(en) · Quelle auswählen, Zugangsdaten eingeben"
-            if sources else "Keine RTSP-Geräte gefunden. IP/Subnetz oder Routerroute prüfen."
+            f"{len(sources)} Netzwerkkandidat(en): "
+            f"{sum(item.rtsp_ready for item in sources)} mit RTSP-Port erreichbar, "
+            f"{sum(not item.rtsp_ready for item in sources)} nur ONVIF. "
+            "Bitte IP übernehmen, Zugangsdaten eingeben und Videoframe testen."
+            if sources else "Keine neuen IP-Kameras gefunden. Gespeicherte Kameras bleiben erhalten. "
+            "IP manuell eingeben oder anderes /24-Subnetz wählen."
         )
 
     def _apply_reolink(self, camera_id: str) -> None:
@@ -333,8 +371,10 @@ class CamerasPage(BasePage):
                 continue
             online = str(camera.get("status", "")).upper() == "ONLINE"
             detail = f"{camera.get('status', 'unbekannt')}"
-            if camera.get("actual_fps") is not None:
+            if online and camera.get("actual_fps") is not None:
                 detail += f" · {camera['actual_fps']} FPS"
+            if not online and camera.get("error"):
+                detail += " · " + str(camera["error"])[:95]
             badge: StatusBadge = self.cards[camera_id]["status"]  # type: ignore[assignment]
             badge.set_state("ok" if online else "warning", detail)
 
@@ -356,8 +396,9 @@ class CamerasPage(BasePage):
                 "display_name": controls["name"].text().strip(),  # type: ignore[attr-defined]
                 "device": self._source(controls["source"]),  # type: ignore[arg-type]
                 "role": str(controls["role"].currentData()),  # type: ignore[attr-defined]
-                "entry_direction": controls["entry_direction"].currentText(),  # type: ignore[attr-defined]
-                "exit_direction": controls["exit_direction"].currentText(),  # type: ignore[attr-defined]
+                "entry_direction": str(controls["entry_direction"].currentData()),  # type: ignore[attr-defined]
+                "exit_direction": str(controls["exit_direction"].currentData()),  # type: ignore[attr-defined]
+                "counting_mode": str(controls["counting_mode"].currentData()),  # type: ignore[attr-defined]
             }
         self.save_requested.emit(values)
 
