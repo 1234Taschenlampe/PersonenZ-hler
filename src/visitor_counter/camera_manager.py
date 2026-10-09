@@ -260,11 +260,11 @@ class CameraCapture(Thread):
                 continue
             try:
                 if not capture.isOpened():
-                    self._mark_failure(f"Cannot open camera {self.stats.source}")
-                    continue
-                self._configure_capture(capture, source)
-                # isOpened() alone is NOT proof that an RTSP stream sends frames.
-                self._capture_loop(capture)
+                    self._mark_failure("RTSP-Zugriff nicht möglich: IP, Port, RTSP-Aktivierung oder Login prüfen")
+                else:
+                    self._configure_capture(capture, source)
+                    # isOpened() alone is NOT proof that an RTSP stream sends frames.
+                    self._capture_loop(capture)
             finally:
                 capture.release()
                 if self.stats.connected:
