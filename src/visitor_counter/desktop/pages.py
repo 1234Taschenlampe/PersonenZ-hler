@@ -113,9 +113,6 @@ class OverviewPage(BasePage):
         online = sum(
             str(item.get("status", "")).upper() == "ONLINE" for item in snapshot.cameras
         )
-        camera_state = (
-            "ok" if snapshot.cameras and online == len(snapshot.cameras) else "warning"
-        )
         self.health["Kameras"].set_state(
             "ok" if online else "warning",
             f"{online} von {len(snapshot.cameras)} online",
