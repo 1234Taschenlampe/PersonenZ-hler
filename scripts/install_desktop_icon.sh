@@ -24,9 +24,18 @@ StartupNotify=true
 DESKTOP
 }
 
-desktop_file_content > "$DESKTOP_DIR/Personenzaehler.desktop"
-desktop_file_content > "$APP_DIR/personenzaehler.desktop"
-chmod +x "$DESKTOP_DIR/Personenzaehler.desktop" "$APP_DIR/personenzaehler.desktop"
+update_desktop_file() {
+  local target="$1"
+  if [[ -f "$target" ]] && cmp -s "$target" <(desktop_file_content); then
+    echo "Desktop-Verknüpfung unverändert: $target"
+    return
+  fi
+  desktop_file_content > "$target"
+  chmod +x "$target"
+  echo "Desktop-Verknüpfung aktualisiert: $target"
+}
+update_desktop_file "$DESKTOP_DIR/Personenzaehler.desktop"
+update_desktop_file "$APP_DIR/personenzaehler.desktop"
 
 if command -v gio >/dev/null 2>&1; then
   gio set "$DESKTOP_DIR/Personenzaehler.desktop" metadata::trusted true >/dev/null 2>&1 || true
