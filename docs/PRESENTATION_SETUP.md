@@ -38,7 +38,9 @@ Diagnose (bei Fehlern):
 ```bash
 ~/.local/share/personenzaehler/app/scripts/check_hardware.sh
 systemctl --user status visitor-counter.service --no-pager
-journalctl --user -u visitor-counter.service -n 100 --no-pager
+systemctl --user status personenzaehler.service --no-pager
+systemctl --user status personenzaehler-mobile-api.service --no-pager
+journalctl --user -u personenzaehler.service -n 100 --no-pager
 ```
 
 Das Skript zeigt bei fehlenden Modellen Hinweise an, installiert die beiden
@@ -92,3 +94,26 @@ demonstrierbare Softwarefunktionen.
 
 Die optionalen Betreiberfelder in der UI entbinden nicht von rechtlichen
 Pflichten beim tatsächlichen Kameraeinsatz.
+
+## Dienstarchitektur bei Installation aus dem Quellcode
+
+Der Installer erzeugt getrennte **Benutzer-Systemdienste**:
+
+- `visitor-counter.service`: grafische Anwendung in der Pi-Desktop-Sitzung;
+- `personenzaehler.service`: die eigentliche Kameraverarbeitung/Inference; wird
+  im Bereich **System** gestartet und bleibt nach dem Einrichten bei Neustarts aktiviert;
+- `personenzaehler-mobile-api.service`: lokale Status-API (automatisch
+  aktiviert); externe Android-Verbindungen benötigen eine erreichbare, sicher
+  konfigurierte TLS-/Token-API-Bindung.
+
+Alle Komponenten nutzen die im Benutzerprofil gespeicherte Konfiguration.
+Bei Änderungen der Netzwerksicherheit den API-Dienst neu starten:
+
+```bash
+systemctl --user restart personenzaehler-mobile-api.service
+```
+
+Die App verbindet sich **nicht von selbst mit einem fremden WLAN**. Handy und Pi
+müssen routbar verbunden sein. Eine lokale API auf `127.0.0.1` ist vom Handy
+aus nicht erreichbar; ein ungeschütztes HTTP-Binding wird nicht automatisch
+freigeschaltet.
