@@ -205,6 +205,8 @@ class CameraPreviewPanel(QWidget):
             f"{len(desired)} von {len(cameras)} Kameras online"
             if desired else f"Keine Live-Kamera online (0 von {len(cameras)})"
         )
+        if self._dialog is not None and self._dialog_camera not in target:
+            self._dialog.close()
         for camera_id in list(self._readers):
             if camera_id not in target or self._readers[camera_id].source != target[camera_id][1]:
                 self._stop_reader(camera_id)
@@ -257,6 +259,9 @@ class CameraPreviewPanel(QWidget):
         if tile is not None:
             tile.clear_image(message)
         self._last_images.pop(camera_id, None)
+        if self._dialog_camera == camera_id and self._dialog_label is not None:
+            self._dialog_label.clear()
+            self._dialog_label.setText(message)
 
     def _expand(self, camera_id: str) -> None:
         tile = self._tiles.get(camera_id)
