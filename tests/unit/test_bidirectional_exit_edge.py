@@ -9,7 +9,7 @@ from visitor_counter.types import BoundingBox, CountingLine, Direction, TrackedO
 def track(frame: int, y: float, *, lost: int = 0, width: float = 40.0) -> TrackedObject:
     return TrackedObject(
         track_id=1,
-        bbox=BoundingBox(25, y - 10, 25 + width, y + 10),
+        bbox=BoundingBox(75, y - 10, 75 + width, y + 10),
         confidence=0.96,
         camera_id="camera_1",
         lost_frames=lost,
