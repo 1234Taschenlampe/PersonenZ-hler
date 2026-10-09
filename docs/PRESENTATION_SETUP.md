@@ -11,10 +11,12 @@ geroutetes Mesh-/Deco-Netz.
   nach Treiberinstallation ggf. den Pi neu starten.
 - Zwei Reolink-LAN-Kameras, für die RTSP in der Kamera aktiviert ist.
 - Zugriffsberechtigungen und möglichst feste DHCP-Adressen für beide Kameras.
-- **Zwei passende, bereits kompilierte Hailo-10H-HEF-Dateien**:
-  `yolo26m_detection_hailo10h_640.hef` und `osnet_x1_0_hailo10h.hef`.
-  Die HEFs sind im Repository **nicht** vorhanden; der Installer kann sie
-  nicht automatisch erzeugen oder seriös durch andere Modelle ersetzen.
+- Die beiden Hailo-10H-HEFs `yolo26m_detection_hailo10h_640.hef` und
+  `osnet_x1_0_hailo10h.hef` werden **automatisch direkt aus dem offiziellen
+  Hailo Model Zoo** heruntergeladen. Ihre bestehenden SHA-256-Referenzwerte
+  werden geprüft; fehlender Internetzugang und inkompatible HailoRT-Versionen
+  werden ausdrücklich gemeldet. Credits und Lizenzbedingungen:
+  [MODEL_SOURCES_AND_CREDITS.md](MODEL_SOURCES_AND_CREDITS.md).
 - Die GitHub-Änderungen müssen zuvor in `main` übernommen sein.
 
 ## Installation auf dem Pi
@@ -29,9 +31,38 @@ bash /tmp/personenzaehler-install.sh
 Installationsziel: `~/.local/share/personenzaehler/app`. Programm im
 Himbeer-/Anwendungsmenü unter **Personenzaehler** starten. Daten und
 Konfiguration liegen für diese Installation im Benutzerprofil.
-Der Installer aktualisiert bei Wiederholung nur per Fast-Forward und verweigert
-das Überschreiben lokal geänderter Quellcodedateien. Das ist **keine**
-automatische Übernahme ungetesteter GitHub-Commits.
+
+**Ablauf (7 Stufen):** 1. Plattform/CPU/Raspberry-Pi-5 erkennen; 2. nur fehlende
+Debian-Pakete installieren (Hailo-10H ausschließlich auf erkanntem Pi 5 ARM64);
+3. Python-Umgebung einmalig erstellen und nur bei geändertem Abhängigkeitsstand
+aktualisieren; 4. Konfiguration/Schlüssel nur bei erstmaligem Fehlen anlegen;
+5. beide Original-HEFs laden und SHA-256 prüfen; 6. Desktop-Starter und
+Benutzer-Systemd-Dienste nur bei geändertem Inhalt aktualisieren; 7. Modell-
+und Hailo-Status prüfen.
+
+Eine erneute Ausführung verändert keine vorhandenen Kameraeinstellungen,
+API-Schlüssel, Datenbanken oder nicht passende HEFs. Der Paketindex wird bei
+Bedarf höchstens einmal täglich aktualisiert. Eine laufende Kamera-Pipeline
+wird nur nach einer tatsächlichen Code- oder Dienstaktualisierung neu gestartet.
+Git-Updates erfolgen ausschließlich per Fast-Forward; lokale Codeänderungen
+werden nicht überschrieben.
+
+Für Diagnose vor der Einrichtung (ohne Änderungen):
+```bash
+bash ~/.local/share/personenzaehler/app/scripts/quick_install.sh --dry-run
+```
+
+Für Weiterbetrieb ohne Git-Update, etwa vor einer Demonstration:
+```bash
+bash ~/.local/share/personenzaehler/app/scripts/quick_install.sh --offline
+```
+
+Der Zähldienst darf erst ausgeführt werden, wenn die beiden Kameraquellen
+sowie Modell- und Postprocessing-Dateien konfiguriert sind. Die entsprechende
+`ExecCondition` verhindert Neustartschleifen vor der Ersteinrichtung.
+Die lokale API bleibt aus Sicherheitsgründen an `127.0.0.1` gebunden.
+Der Einrichtungsassistent muss Kamera-Zugangsdaten erhalten; unbekannte
+Passwörter können nicht automatisch ermittelt werden.
 
 Diagnose (bei Fehlern):
 
@@ -43,9 +74,11 @@ systemctl --user status personenzaehler-mobile-api.service --no-pager
 journalctl --user -u personenzaehler.service -n 100 --no-pager
 ```
 
-Das Skript zeigt bei fehlenden Modellen Hinweise an, installiert die beiden
-projektspezifischen HEFs aber nicht. Nach dem Import unter **KI & Hardware**
-müssen Modell, Firmware und Inferenzfähigkeit auf dem Zielgerät geprüft werden.
+Der Installer lädt automatisch beide offiziellen HEFs herunter und prüft ihre
+SHA-256-Werte; per **KI & Hardware** können sie später einzeln nachgeladen
+werden. Anschließend müssen Treiber/Firmware und die echte Inferenz auf dem
+Zielgerät geprüft werden. Bei Problemen ist derselbe Installer erneut
+aufrufbar, ohne bereits eingerichtete Komponenten zu überschreiben.
 
 ## Zwei Reolink-Kameras verbinden
 

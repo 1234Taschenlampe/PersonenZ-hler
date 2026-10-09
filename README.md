@@ -14,9 +14,18 @@ curl -fsSL https://raw.githubusercontent.com/1234Taschenlampe/PersonenZ-hler/mai
 bash /tmp/personenzaehler-install.sh
 ```
 
-Anschließend das Programm über das Raspberry-Pi-Anwendungsmenü öffnen, unter
-**Kameras** private LAN-Kameras suchen oder Reolink-IP und Zugangsdaten manuell
-eintragen. Nach erfolgreichem Kameratest die passenden Hailo-10H-HEFs importieren.
+Der Einmal-Installer erkennt Raspberry Pi OS / ARM64 / Pi 5, installiert nur
+fehlende Debian-Pakete und den passenden Hailo-10H-Treiber, legt eine schlanke
+Python-Umgebung und die lokalen Dienste an und lädt beide Original-HEFs direkt
+von Hailo mit SHA-256-Prüfung. **Bei erneutem Aufruf werden apt-, pip- und
+systemd-Eingriffe ohne Änderungsbedarf übersprungen**; persönliche Daten,
+Schlüssel und Einstellungen werden nicht zurückgesetzt.
+
+Danach im Raspberry-Pi-Anwendungsmenü starten, unter **Kameras** nach
+RTSP-Geräten suchen oder Reolink-IP und Zugangsdaten manuell eintragen.
+Ohne bekannte Kamera-Zugangsdaten kann kein Installer die Kameras verbinden.
+Ein vollständiger, schreibfreier Vorabtest ist mit
+`bash ~/.local/share/personenzaehler/app/scripts/quick_install.sh --dry-run` möglich.
 Für den Präsentationstest gilt die [Raspberry-Pi-Abnahmecheckliste](docs/PRESENTATION_SETUP.md).
 Der Installer lädt die offiziellen Hailo-10H-Modelle mit SHA-256-Prüfung nach.
 Quellen, direkte Herstellerdownloads, Urheber und Lizenzhinweise stehen unter
