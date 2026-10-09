@@ -12,6 +12,7 @@ import ipaddress
 import json
 import socket
 import subprocess
+from time import monotonic
 from urllib.parse import quote
 
 
@@ -33,10 +34,16 @@ def _is_lan(value: ipaddress.IPv4Address | ipaddress.IPv4Network) -> bool:
 class RtspCandidate:
     host: str
     port: int
+    discovery_method: str = "RTSP"
+    rtsp_ready: bool = True
 
     @property
     def label(self) -> str:
-        return f"RTSP-Gerät {self.host}:{self.port} (Zugangsdaten erforderlich)"
+        return (
+            f"{self.host}:{self.port} · RTSP-Port erreichbar"
+            if self.rtsp_ready
+            else f"{self.host} · ONVIF gefunden, RTSP noch unbestätigt"
+        )
 
     @property
     def url_template(self) -> str:
@@ -96,7 +103,7 @@ def _probe(host: str, timeout: float, ports: tuple[int, ...]) -> RtspCandidate |
 
 
 def scan_rtsp_network(
-    cidr: str = "", *, timeout: float = 0.25, max_workers: int = 32,
+    cidr: str = "", *, timeout: float = 0.7, max_workers: int = 48,
     ports: tuple[int, ...] = (554, 8554),
 ) -> list[RtspCandidate]:
     """Explicit, bounded LAN TCP discovery. No passwords and no video sent."""
@@ -119,6 +126,69 @@ def scan_rtsp_network(
             if candidate:
                 found.append(candidate)
     return sorted(found, key=lambda item: (int(ipaddress.IPv4Address(item.host)), item.port))
+
+
+def discover_onvif_hosts(*, timeout: float = 1.4) -> list[str]:
+    """Bounded ONVIF WS-Discovery multicast; never sends camera credentials.
+
+    ONVIF discovery identifies possible IP cameras even if the RTSP port is
+    disabled. A discovery response is NOT proof that a video feed is available.
+    """
+    if not 0 < timeout <= 3:
+        raise ValueError("ONVIF-Timeout außerhalb des erlaubten Bereichs.")
+    packet = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" '
+        'xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing" '
+        'xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
+        '<e:Header><w:MessageID>uuid:34d65cae-9a14-4e2e-9871-6f163071a8cb</w:MessageID>'
+        '<w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
+        '<w:Action e:mustUnderstand="true">'
+        'http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>'
+        '</e:Header><e:Body><d:Probe/></e:Body></e:Envelope>'
+    ).encode("utf-8")
+    hosts: set[str] = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+            sock.settimeout(min(0.3, timeout))
+            sock.sendto(packet, ("239.255.255.250", 3702))
+            deadline = monotonic() + timeout
+            while monotonic() < deadline:
+                sock.settimeout(min(0.25, max(0.01, deadline - monotonic())))
+                try:
+                    data, address = sock.recvfrom(32768)
+                except socket.timeout:
+                    continue
+                if b"ProbeMatches" not in data and b"ProbeMatch" not in data:
+                    continue
+                try:
+                    ip = ipaddress.IPv4Address(address[0])
+                except ValueError:
+                    continue
+                if _is_lan(ip):
+                    hosts.add(str(ip))
+    except OSError:
+        return []
+    return sorted(hosts, key=lambda host: int(ipaddress.IPv4Address(host)))[:64]
+
+
+def discover_network_cameras(cidr: str = "") -> list[RtspCandidate]:
+    """Find RTSP-ready devices and ONVIF candidates, deduplicated by IP.
+
+    For explicit CIDR only that network is scanned; multicast responses are
+    accepted only if inside it. No discovery step guarantees video access.
+    """
+    scope = _allowed_network(cidr) if cidr.strip() else None
+    rtsp = scan_rtsp_network(cidr)
+    by_ip = {device.host: device for device in rtsp}
+    for host in discover_onvif_hosts():
+        ip = ipaddress.IPv4Address(host)
+        if scope is not None and ip not in scope:
+            continue
+        if host not in by_ip:
+            by_ip[host] = RtspCandidate(host, 554, "ONVIF", False)
+    return sorted(by_ip.values(), key=lambda item: int(ipaddress.IPv4Address(item.host)))
 
 
 def reolink_rtsp_url(
