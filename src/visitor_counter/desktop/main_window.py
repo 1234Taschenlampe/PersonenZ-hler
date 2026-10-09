@@ -248,20 +248,45 @@ class MainWindow(QMainWindow):
     def _save_cameras(self, values: dict[str, dict[str, str]]) -> None:
         try:
             config = self.settings_service.load()
+            changed = False
             for camera_id, camera_values in values.items():
                 camera = config.cameras[camera_id]
-                camera.display_name = camera_values["display_name"] or camera_id
-                camera.device = camera_values["device"] or None
-                camera.role = camera_values["role"]
-                camera.entry_direction = camera_values["entry_direction"]
-                camera.exit_direction = camera_values["exit_direction"]
-                camera.counting_mode = camera_values["counting_mode"]
-            self.settings_service.save(config)
+                new_values = {
+                    "display_name": camera_values["display_name"] or camera_id,
+                    "device": camera_values["device"] or None,
+                    "role": camera_values["role"],
+                    "entry_direction": camera_values["entry_direction"],
+                    "exit_direction": camera_values["exit_direction"],
+                    "counting_mode": camera_values["counting_mode"],
+                }
+                for field, value in new_values.items():
+                    if getattr(camera, field) != value:
+                        changed = True
+                        setattr(camera, field, value)
+            if changed:
+                self.settings_service.save(config)
         except SettingsError as exc:
             QMessageBox.warning(self, "Kameras nicht gespeichert", str(exc))
             return
-        self.global_status.setText("Kamerakonfiguration gespeichert")
-        self.refresh()
+        if not changed:
+            self.global_status.setText("Kameraeinstellungen unverändert")
+            return
+        self.global_status.setText("Kameraeinstellungen gespeichert; Zähldienst wird aktualisiert …")
+
+        # The headless worker holds its camera URLs in memory. A changed IP,
+        # password or streaming profile needs a restart to take effect.
+        # Do not start an intentionally stopped/unconfigured service.
+        def reload_if_running() -> str:
+            manager = self.application_service.service_manager
+            if manager.status().active_state != "active":
+                return "Gespeichert. Zähldienst ist noch gestoppt; unter System starten."
+            manager.action("restart")
+            return "Kameraeinstellungen übernommen; Zähldienst neu gestartet."
+
+        self._run_worker(
+            reload_if_running,
+            lambda message: (self.global_status.setText(message), self.refresh()),
+        )
 
     def _discover_cameras(self) -> None:
         def discover() -> list[str]:
