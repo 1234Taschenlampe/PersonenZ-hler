@@ -24,18 +24,22 @@ sudo apt-get install -y \
   v4l-utils libgl1 libglib2.0-0 libxcb-cursor0 \
   wmctrl util-linux
 
+# The desktop/setup/diagnostic UI must still install when the AI hardware is
+# temporarily disconnected or the vendor packages are not yet configured.
 if ! command -v hailortcli >/dev/null 2>&1; then
-  log "HailoRT wurde nicht gefunden. Versuche auf Raspberry Pi OS das offizielle hailo-all Paket zu installieren ..."
-  if sudo apt-get install -y hailo-all; then
-    log "hailo-all installiert."
+  if command -v apt-cache >/dev/null 2>&1 && apt-cache show hailo-all >/dev/null 2>&1; then
+    log "HailoRT fehlt. Versuche das verfügbare Raspberry-Pi-Paket hailo-all ..."
+    sudo apt-get install -y hailo-all || log "WARNUNG: hailo-all konnte nicht installiert werden."
   else
-    fail "HailoRT konnte nicht automatisch installiert werden. Richte zuerst das offizielle Hailo/Raspberry-Pi-Paketrepository ein und starte den Installer erneut."
+    log "WARNUNG: Kein HailoRT/hailo-all verfügbar. Die GUI kann trotzdem eingerichtet werden."
   fi
 fi
 
-log "Pruefe Hailo-Geraet ..."
-if ! hailortcli fw-control identify; then
-  fail "HailoRT ist installiert, aber der Hailo-Beschleuniger wurde nicht erfolgreich identifiziert."
+if command -v hailortcli >/dev/null 2>&1; then
+  log "Pruefe Hailo-Geraet ..."
+  hailortcli fw-control identify || log "WARNUNG: Hailo erkannt, aber noch nicht betriebsbereit."
+else
+  log "WARNUNG: Hailo-10H und passende Firmware später unter KI & Hardware prüfen."
 fi
 
 cd "$PROJECT_DIR"
@@ -71,8 +75,8 @@ if [[ ! -s "$REID_MODEL" ]]; then
 fi
 
 log "Installiere Desktop-Starter und Autostart ..."
-./scripts/install_desktop_icon.sh
-./scripts/install_autostart.sh
+PERSONENZAEHLER_USE_XDG="${PERSONENZAEHLER_USE_XDG:-1}" ./scripts/install_desktop_icon.sh
+PERSONENZAEHLER_USE_XDG="${PERSONENZAEHLER_USE_XDG:-1}" ./scripts/install_autostart.sh
 
 log "Pruefe Hardware und Installation ..."
 ./scripts/check_hardware.sh || true
@@ -92,5 +96,6 @@ Wichtig fuer den eindeutigen Tageszaehler:
   - OSNet ReID HEF:       $PROJECT_DIR/$REID_MODEL
   - VISITOR_COUNTER_DATA_KEY wird aus $SECRETS_FILE geladen.
 
-Vor dem ersten Livebetrieb muessen die Betreiber-/Datenschutzfelder in config/config.yaml ausgefuellt werden.
+Betreiberangaben können später in der Anwendung ergänzt werden; geltende Vorgaben vor dem Kameraeinsatz eigenverantwortlich prüfen.
+Einrichtung und Diagnose sind auch ohne Hailo/HEFs zugänglich; reale Zählung setzt die richtigen HEFs und funktionsfähige Hardware voraus.
 EOF
