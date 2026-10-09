@@ -15,6 +15,20 @@ import subprocess
 from urllib.parse import quote
 
 
+# Restrict discovery to RFC 1918 LAN addresses, not every special IPv4 range
+# that Python classifies as is_private (e.g. documentation/loopback blocks).
+LAN_RANGES = (
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+)
+
+
+def _is_lan(value: ipaddress.IPv4Address | ipaddress.IPv4Network) -> bool:
+    return any(value in scope if isinstance(value, ipaddress.IPv4Address)
+               else value.subnet_of(scope) for scope in LAN_RANGES)
+
+
 @dataclass(frozen=True, order=True)
 class RtspCandidate:
     host: str
@@ -34,7 +48,7 @@ def _allowed_network(value: str) -> ipaddress.IPv4Network:
         network = ipaddress.ip_network(value.strip(), strict=False)
     except ValueError as exc:
         raise ValueError("Ungültiges Netz: Bitte IPv4/CIDR verwenden, z. B. 192.168.1.0/24.") from exc
-    if not isinstance(network, ipaddress.IPv4Network) or not network.is_private:
+    if not isinstance(network, ipaddress.IPv4Network) or not _is_lan(network):
         raise ValueError("Nur private IPv4-Netze dürfen durchsucht werden.")
     if network.prefixlen < 24:
         raise ValueError("Netz zu groß: Maximal ein /24-Netz (254 Hosts) pro Suche.")
@@ -62,7 +76,7 @@ def local_networks() -> list[ipaddress.IPv4Network]:
                 continue
             try:
                 ip = ipaddress.IPv4Address(address["local"])
-                if not ip.is_private or ip.is_loopback or ip.is_link_local:
+                if not _is_lan(ip):
                     continue
                 prefix = max(24, int(address.get("prefixlen", 24)))
                 networks.add(_allowed_network(f"{ip}/{prefix}"))
@@ -116,7 +130,7 @@ def reolink_rtsp_url(
         ip = ipaddress.IPv4Address(host.strip())
     except ValueError as exc:
         raise ValueError("Bitte eine gültige IPv4-Adresse der Kamera eingeben.") from exc
-    if not ip.is_private or ip.is_loopback or ip.is_multicast or ip.is_link_local:
+    if not _is_lan(ip):
         raise ValueError("Die Kamera muss eine private, routbare IPv4-Adresse haben.")
     if not 1 <= port <= 65535:
         raise ValueError("Ungültiger Port.")
