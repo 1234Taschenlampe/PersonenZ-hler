@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 from threading import Condition, Event, Thread
-from time import monotonic, sleep, time
+from time import monotonic, time
 from typing import Callable
 from urllib.parse import urlparse
 
