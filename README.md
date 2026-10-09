@@ -18,8 +18,15 @@ Anschließend das Programm über das Raspberry-Pi-Anwendungsmenü öffnen, unter
 **Kameras** private LAN-Kameras suchen oder Reolink-IP und Zugangsdaten manuell
 eintragen. Nach erfolgreichem Kameratest die passenden Hailo-10H-HEFs importieren.
 Für den Präsentationstest gilt die [Raspberry-Pi-Abnahmecheckliste](docs/PRESENTATION_SETUP.md).
-**Wichtig:** Die projektspezifischen YOLO26m- und OSNet-HEFs sind nicht Teil
-dieses Git-Repositories; Installation allein bedeutet noch keine einsatzfähige Erkennung.
+Der Installer lädt die offiziellen Hailo-10H-Modelle mit SHA-256-Prüfung nach.
+Quellen, direkte Herstellerdownloads, Urheber und Lizenzhinweise stehen unter
+[Modellquellen & Credits](docs/MODEL_SOURCES_AND_CREDITS.md). Bei einem
+Netzwerk-/Kompatibilitätsfehler bleiben Einrichtung und Diagnose verfügbar;
+die Modelle lassen sich unter **KI & Hardware** mit einem Klick nachladen.
+**Wichtig:** Die YOLO26m- und OSNet-HEFs sind nicht Teil dieses Git-Repositories,
+werden aber beim Einrichten direkt von Hailo heruntergeladen. Installation
+allein bedeutet noch keine einsatzfähige Erkennung: HailoRT, Firmware und
+echte Kamera-Inferenz müssen auf dem Pi geprüft werden.
 Ein Neuaufsetzen des Pi ist normalerweise nicht erforderlich.
 
 ## Installation für Anwender

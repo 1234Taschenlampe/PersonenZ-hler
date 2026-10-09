@@ -419,6 +419,7 @@ class HistoryPage(BasePage):
 class HardwarePage(BasePage):
     diagnose_requested = Signal()
     model_import_requested = Signal(str, Path)
+    model_download_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__(
@@ -439,6 +440,13 @@ class HardwarePage(BasePage):
         row.addWidget(run)
         self.layout.addLayout(row)
         imports = QHBoxLayout()
+        download = QPushButton("Beide Originalmodelle herunterladen")
+        download.setProperty("primary", True)
+        download.setToolTip(
+            "Hailo Model Zoo: YOLO26m und OSNet; streng über die hinterlegten SHA-256-Prüfsummen verifiziert."
+        )
+        download.clicked.connect(self.model_download_requested.emit)
+        imports.addWidget(download)
         detector = QPushButton("YOLO26m-HEF importieren")
         detector.clicked.connect(lambda: self._choose_model("detector"))
         reid = QPushButton("OSNet-HEF importieren")

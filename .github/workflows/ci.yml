@@ -41,6 +41,15 @@ jobs:
       - name: Digital twin acceptance suite
         run: PYTHONPATH=src python -m visitor_counter.emulator
 
+  model-integrity:
+    name: Official Hailo HEF integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify official Hailo YOLO26m and OSNet downloads and SHA-256
+        run: python scripts/verify_upstream_hefs.py
+
   security:
     runs-on: ubuntu-latest
     steps:
