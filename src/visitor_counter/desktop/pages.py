@@ -186,6 +186,9 @@ class CamerasPage(BasePage):
         hint.setWordWrap(True)
         hint.setProperty("muted", True)
         self.layout.addWidget(hint)
+        self.cameras_summary = QLabel("Kamerastatus wird geladen …")
+        self.cameras_summary.setProperty("muted", True)
+        self.layout.addWidget(self.cameras_summary)
         self.cards: dict[str, dict[str, QWidget]] = {}
         for camera_id in ("camera_1", "camera_2"):
             card = Card()
@@ -197,17 +200,23 @@ class CamerasPage(BasePage):
             source.setToolTip("RTSP-URL eingeben oder über die IP-Hilfe zusammenstellen.")
             ip_address = QLineEdit()
             ip_address.setPlaceholderText("z. B. 192.168.68.101")
+            rtsp_port = QSpinBox()
+            rtsp_port.setRange(1, 65535)
+            rtsp_port.setValue(554)
             camera_user = QLineEdit()
             camera_user.setPlaceholderText("Kamera-Benutzername")
             camera_password = QLineEdit()
             camera_password.setEchoMode(QLineEdit.Password)
-            camera_password.setPlaceholderText("Kamera-Passwort")
+            camera_password.setPlaceholderText("Passwort; bei vorhandener URL nur für Änderung nötig")
             stream = QComboBox()
             stream.addItem("Substream (schneller)", "sub")
             stream.addItem("Hauptstream (hohe Auflösung)", "main")
             apply_ip = QPushButton("Reolink-Quelle aus IP übernehmen")
             apply_ip.clicked.connect(
                 lambda _checked=False, cid=camera_id: self._apply_reolink(cid)
+            )
+            source.currentIndexChanged.connect(
+                lambda _index, cid=camera_id: self._set_ip_from_selection(cid)
             )
             role = QComboBox()
             role.addItem("Eingangsbereich", "entrance")
@@ -234,6 +243,7 @@ class CamerasPage(BasePage):
             form.addRow("Anzeigename", name)
             form.addRow("Kameraquelle", source)
             form.addRow("IP-Adresse (manuell)", ip_address)
+            form.addRow("RTSP-Port", rtsp_port)
             form.addRow("Benutzername", camera_user)
             form.addRow("Passwort", camera_password)
             form.addRow("Videoqualität", stream)
@@ -256,6 +266,7 @@ class CamerasPage(BasePage):
                 "name": name,
                 "source": source,
                 "ip_address": ip_address,
+                "rtsp_port": rtsp_port,
                 "camera_user": camera_user,
                 "camera_password": camera_password,
                 "stream": stream,
@@ -274,6 +285,13 @@ class CamerasPage(BasePage):
             controls["name"].setText(camera.display_name)  # type: ignore[attr-defined]
             source: QComboBox = controls["source"]  # type: ignore[assignment]
             self._select_source(source, camera.device or "")
+            # Populate IP and RTSP port from a saved stream without exposing
+            # previously entered passwords in the form.
+            from urllib.parse import urlsplit
+            parsed = urlsplit(camera.device or "")
+            if parsed.scheme.lower() in {"rtsp", "rtsps"} and parsed.hostname:
+                controls["ip_address"].setText(parsed.hostname)  # type: ignore[attr-defined]
+                controls["rtsp_port"].setValue(parsed.port or 554)  # type: ignore[attr-defined]
             role: QComboBox = controls["role"]  # type: ignore[assignment]
             role.setCurrentIndex(max(0, role.findData(camera.role)))
             entry: QComboBox = controls["entry_direction"]  # type: ignore[assignment]
@@ -344,6 +362,19 @@ class CamerasPage(BasePage):
             "IP manuell eingeben oder anderes /24-Subnetz wählen."
         )
 
+    def _set_ip_from_selection(self, camera_id: str) -> None:
+        # Selecting an ONVIF/RTSP candidate prepares the editable IP fields,
+        # not a fake authenticated camera connection.
+        from urllib.parse import urlsplit
+        controls = self.cards.get(camera_id)
+        if not controls:
+            return
+        source = self._source(controls["source"])  # type: ignore[arg-type]
+        parsed = urlsplit(source)
+        if parsed.scheme.lower() in {"rtsp", "rtsps"} and parsed.hostname:
+            controls["ip_address"].setText(parsed.hostname)  # type: ignore[attr-defined]
+            controls["rtsp_port"].setValue(parsed.port or 554)  # type: ignore[attr-defined]
+
     def _apply_reolink(self, camera_id: str) -> None:
         from PySide6.QtWidgets import QMessageBox
         controls = self.cards[camera_id]
@@ -352,6 +383,7 @@ class CamerasPage(BasePage):
                 controls["ip_address"].text().strip(),  # type: ignore[attr-defined]
                 controls["camera_user"].text().strip(),  # type: ignore[attr-defined]
                 controls["camera_password"].text(),  # type: ignore[attr-defined]
+                port=controls["rtsp_port"].value(),  # type: ignore[attr-defined]
                 stream=str(controls["stream"].currentData()),  # type: ignore[attr-defined]
             )
         except ValueError as exc:
@@ -365,16 +397,35 @@ class CamerasPage(BasePage):
         )
 
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
+        online_count = sum(
+            str(c.get("status", "")).upper() == "ONLINE"
+            and c.get("seconds_since_last_frame", 0) is not None
+            and float(c.get("seconds_since_last_frame", 0)) < 10
+            for c in snapshot.cameras
+        )
+        configured_count = sum(
+            bool(self._source(c["source"])) for c in self.cards.values()  # type: ignore[arg-type]
+        )
+        self.cameras_summary.setText(
+            f"{configured_count} konfigurierte Kameraquellen · "
+            f"{online_count} von {len(snapshot.cameras)} liefern aktuell Bilder. "
+            "USB-Suche und IP-Kamerasuche sind unabhängig."
+        )
         for camera in snapshot.cameras:
             camera_id = str(camera.get("camera_id", ""))
             if camera_id not in self.cards:
                 continue
+            age = camera.get("seconds_since_last_frame")
             online = str(camera.get("status", "")).upper() == "ONLINE"
+            if age is not None and float(age) > 10:
+                online = False
             detail = f"{camera.get('status', 'unbekannt')}"
+            if not online and age is not None and float(age) > 10:
+                detail = "Kein aktuelles Bild"
             if online and camera.get("actual_fps") is not None:
                 detail += f" · {camera['actual_fps']} FPS"
-            if not online and camera.get("error"):
-                detail += " · " + str(camera["error"])[:95]
+            if not online and camera.get("last_error"):
+                detail += " · " + str(camera["last_error"])[:95]
             badge: StatusBadge = self.cards[camera_id]["status"]  # type: ignore[assignment]
             badge.set_state("ok" if online else "warning", detail)
 
