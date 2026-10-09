@@ -101,6 +101,72 @@ Passwörter mit Sonderzeichen durch die integrierte IP-Hilfe eingeben; das
 Programm kodiert sie für die URL. Niemals Passwörter in Logs/Screenshots
 zeigen.
 
+## Verbesserte Kamerasuche und Verbindung
+
+Die Seite **Kameras** trennt jetzt eindeutig:
+
+- **USB-Kameras**: nur lokale USB-Webcams; eine Anzeige `0 USB-Webcams`
+  sagt *nichts* über bereits verbundene Reolink-IP-Kameras aus.
+- **IP-Kameras suchen**: RTSP-TCP-Portsuche (554/8554) und ONVIF-Discovery
+  (Multicast UDP 3702) im eigenen LAN. Ein ONVIF-Fund bestätigt **noch
+  keine Videobilder**. Die Suche erhält gespeicherte Kamerakonfigurationen.
+- **Kamera 1/2**: die obere Statuszeile nennt die tatsächlich konfigurierten
+  Quellen und wie viele aktuell gültige Videobilder liefern. Eine Kamera
+  gilt erst nach dekodiertem Frame als **ONLINE**.
+- **Verbindung testen**: derselbe RTSP-over-TCP-Videopfad wie der
+  Zähldienst, mit definierten Open-/Read-Timeouts. Fehlertexte unterscheiden
+  fehlgeschlagene Verbindung und fehlendes Videobild.
+
+Wenn nur eine der beiden Reolink-Kameras Bilder liefert:
+1. IP-Adresse und Port der zweiten Kamera unter Kameras prüfen.
+2. Kamera in Reolink-App oder Weboberfläche: RTSP aktiviert, Benutzerkonto
+   besitzt Stream-Zugriff, Haupt- und Substream aktiv.
+3. Zuerst **Substream**, falls dieser nicht funktioniert **Hauptstream**
+   testen. Bei 10 FPS ist der Stream nicht zwangsläufig defekt, solange
+   echte fortlaufende Bilder eintreffen.
+4. Bei mehreren Routern sicherstellen, dass der Pi **beide** IP-Adressen
+   tatsächlich erreicht. ONVIF-Multicast überquert meist keine Router.
+5. **Verbindung testen** anklicken, danach **Änderungen speichern** und
+   im Bereich System den Zähldienst neu starten. Die GUI-Suche allein
+   ersetzt keine laufende Dienstkonfiguration.
+
+## Richtungsabhängige Zählung an beiden Türen
+
+**Beide Kameras erkennen jeweils beide Richtungen**. „Eingangsbereich“ und
+„Ausgangsbereich“ beschreiben nur den Standort, nicht die zulässige
+Bewegungsrichtung. Sobald eine Person die korrekt eingestellte
+A/B-Bewegungsrichtung nach innen passiert, wird sie als Eintritt bewertet;
+in der Gegenrichtung als Austritt. Damit gilt auch:
+
+- Ausgangstür als Eintritt genutzt → **+1** bei bestätigtem Eintritt
+- Eingangstür als Ausgang genutzt → **−1** bei bestätigtem Austritt
+
+Der grafische Dialog enthält nur die Entscheidung:
+**„Welche Richtung führt ins Gebäude?“** Die Rückrichtung wird automatisch
+als Ausgang festgelegt. Bereits gespeicherte einseitige Legacy-Presets
+werden beim Laden kompatibel in eine bidirektionale Einstellung migriert.
+
+Unter **„Wann wird gezählt?“** gibt es zwei Modi:
+
+- **Linie/Seitenwechsel (empfohlen):** eine bestätigte Bewegung von A nach
+  B beziehungsweise B nach A mit Hysterese zählt sofort.
+- **Erst am Bildrand nach Verschwinden:** der Track muss zuvor stabil
+  auf der anderen Seite der konfigurierten Linie gewesen sein, einen
+  bestätigten Seitenwechsel ausführen und am tatsächlichen Frame-Rand
+  aus dem Blickfeld verschwinden. Kurzzeitige Verdeckungen oder einfaches
+  Verschwinden mitten im Raum zählen nicht.
+
+Die Linie bleibt räumlich an der Türschwelle auszurichten. Die Darstellung
+der Linie nutzt die konfigurierten Bildkoordinaten und wird bei verkleinerten
+Reolink-Substreams auf die tatsächliche Auflösung umgerechnet.
+
+**Wichtig:** Auch dieser Modus kann physikalisch nicht aus beliebigem
+Verschwinden aus einem Kamerabild zweifelsfrei einen Ein- oder Austritt
+ableiten. Kamera-Geometrie und Laufrichtung müssen anhand realer Passagen
+festgelegt werden; bei zu schwacher Sicht auf beide Seiten der Tür können
+Occlusions und Kameraübergänge zu Unsicherheit führen. Ein manueller
+Test mit je fünf Passagen in beide Richtungen pro Kamera ist sinnvoll.
+
 ## Abnahme mit echten Personen (nicht mit Emulator)
 
 - Beide Kameras liefern dauerhaft Bilder, Rollen und Geometrie sind korrekt.
