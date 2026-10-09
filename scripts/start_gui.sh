@@ -108,5 +108,11 @@ fi
 echo $$ > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
 export PYTHONPATH="$PROJECT_DIR/src:${PYTHONPATH:-}"
-export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+if [ -z "${QT_QPA_PLATFORM:-}" ]; then
+  if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    export QT_QPA_PLATFORM=wayland
+  else
+    export QT_QPA_PLATFORM=xcb
+  fi
+fi
 exec "$PROJECT_DIR/.venv/bin/python" -m visitor_counter.app --project-root "$PROJECT_DIR" >> "$LOG_FILE" 2>&1
