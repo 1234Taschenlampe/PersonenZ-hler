@@ -40,6 +40,24 @@ class SettingsService:
             ) from exc
 
     def save(self, config: AppConfig) -> None:
+        # The Pi source installer keeps mutable data outside its Git checkout.
+        # The production pipeline uses config.database.path directly, therefore
+        # persist the absolute XDG location once instead of splitting state
+        # between project_root/data and the GUI's XDG_DATA_HOME.
+        if (
+            not self.allow_privileged
+            and os.environ.get("PERSONENZAEHLER_USE_XDG", "").lower()
+            in {"1", "true", "yes"}
+            and not Path(config.database.path).expanduser().is_absolute()
+        ):
+            base = Path(
+                os.environ.get(
+                    "XDG_DATA_HOME", str(Path.home() / ".local" / "share")
+                )
+            ).expanduser()
+            config.database.path = str(
+                base / "personenzaehler" / Path(config.database.path).name
+            )
         errors = validate_config(config)
         if errors:
             raise SettingsError(

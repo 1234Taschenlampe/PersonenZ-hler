@@ -37,7 +37,9 @@ class ApplicationService:
     ) -> None:
         self.paths = paths
         self.settings_path = paths.config_file
-        self.service_manager = service_manager or ServiceManager()
+        self.service_manager = service_manager or ServiceManager(
+            "personenzaehler.service", user_service=not paths.system_layout
+        )
         self.license_service = LicenseService(paths)
 
     def config(self) -> AppConfig:
