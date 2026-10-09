@@ -79,6 +79,8 @@ EnvironmentFile=-$secrets
 ExecCondition=$PWD/.venv/bin/python $PWD/scripts/service_preflight.py --project-root $PWD
 ExecStart=$PWD/.venv/bin/python -m visitor_counter.service --project-root $PWD
 Restart=on-failure
+# Fatal configuration/licensing errors must not trigger restart storms.
+RestartPreventExitStatus=2 3 4
 RestartSec=10
 TimeoutStopSec=25
 UMask=0077
