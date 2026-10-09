@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from ..application_service import DashboardSnapshot
 from ..configuration import AppConfig
 from ..license_service import LicenseStatus
+from ..network_camera_discovery import reolink_rtsp_url
 from .components import Card, HistoryChart, MetricCard, PageHeader, StatusBadge
 
 
@@ -143,6 +144,7 @@ class OverviewPage(BasePage):
 
 class CamerasPage(BasePage):
     discover_requested = Signal()
+    network_scan_requested = Signal(str)
     save_requested = Signal(dict)
     test_requested = Signal(str)
 
@@ -152,18 +154,36 @@ class CamerasPage(BasePage):
             "Quellen, Rollen und erwartete Bewegungsrichtungen ohne Konfigurationsdatei verwalten",
         )
         toolbar = QHBoxLayout()
-        discover = QPushButton("Kameras suchen")
-        discover.setProperty("primary", True)
+        discover = QPushButton("USB suchen")
         discover.clicked.connect(self.discover_requested.emit)
+        network_scan = QPushButton("Netzwerk scannen")
+        network_scan.setProperty("primary", True)
+        self.scan_subnet = QLineEdit()
+        self.scan_subnet.setPlaceholderText("Automatisch oder 192.168.1.0/24")
+        self.scan_subnet.setToolTip("Nur eigene private Netze, maximal /24. Leer = direkt angeschlossene Netze.")
+        self.scan_subnet.setMaximumWidth(235)
+        network_scan.clicked.connect(
+            lambda: self.network_scan_requested.emit(self.scan_subnet.text().strip())
+        )
         save = QPushButton("Änderungen speichern")
         save.clicked.connect(self._emit_save)
         self.discovery_status = QLabel("")
         self.discovery_status.setProperty("muted", True)
+        toolbar.addWidget(network_scan)
+        toolbar.addWidget(self.scan_subnet)
         toolbar.addWidget(discover)
         toolbar.addWidget(save)
         toolbar.addWidget(self.discovery_status)
         toolbar.addStretch()
         self.layout.addLayout(toolbar)
+        hint = QLabel(
+            "RTSP-Kameras im eigenen LAN suchen oder die Kamera-IP manuell eingeben. "
+            "Der Scan findet erreichbare RTSP-Ports, aber keine Zugangsdaten. "
+            "Bei getrennten Router-Netzen muss der Pi das Kamera-Subnetz erreichen."
+        )
+        hint.setWordWrap(True)
+        hint.setProperty("muted", True)
+        self.layout.addWidget(hint)
         self.cards: dict[str, dict[str, QWidget]] = {}
         for camera_id in ("camera_1", "camera_2"):
             card = Card()
@@ -172,6 +192,21 @@ class CamerasPage(BasePage):
             name = QLineEdit()
             source = QComboBox()
             source.setEditable(True)
+            source.setToolTip("RTSP-URL eingeben oder über die IP-Hilfe zusammenstellen.")
+            ip_address = QLineEdit()
+            ip_address.setPlaceholderText("z. B. 192.168.68.101")
+            camera_user = QLineEdit()
+            camera_user.setPlaceholderText("Kamera-Benutzername")
+            camera_password = QLineEdit()
+            camera_password.setEchoMode(QLineEdit.Password)
+            camera_password.setPlaceholderText("Kamera-Passwort")
+            stream = QComboBox()
+            stream.addItem("Substream (schneller)", "sub")
+            stream.addItem("Hauptstream (hohe Auflösung)", "main")
+            apply_ip = QPushButton("Reolink-Quelle aus IP übernehmen")
+            apply_ip.clicked.connect(
+                lambda _checked=False, cid=camera_id: self._apply_reolink(cid)
+            )
             role = QComboBox()
             role.addItem("Eingang", "entrance")
             role.addItem("Ausgang", "exit")
@@ -185,6 +220,11 @@ class CamerasPage(BasePage):
             form.addRow(QLabel(f"{camera_id.replace('_', ' ').title()}"), status)
             form.addRow("Anzeigename", name)
             form.addRow("Kameraquelle", source)
+            form.addRow("IP-Adresse (manuell)", ip_address)
+            form.addRow("Benutzername", camera_user)
+            form.addRow("Passwort", camera_password)
+            form.addRow("Videoqualität", stream)
+            form.addRow("", apply_ip)
             form.addRow("Rolle", role)
             form.addRow("Eintrittsrichtung", entry_direction)
             form.addRow("Austrittsrichtung", exit_direction)
@@ -192,6 +232,10 @@ class CamerasPage(BasePage):
             self.cards[camera_id] = {
                 "name": name,
                 "source": source,
+                "ip_address": ip_address,
+                "camera_user": camera_user,
+                "camera_password": camera_password,
+                "stream": stream,
                 "role": role,
                 "entry_direction": entry_direction,
                 "exit_direction": exit_direction,
@@ -205,24 +249,82 @@ class CamerasPage(BasePage):
             camera = config.cameras[camera_id]
             controls["name"].setText(camera.display_name)  # type: ignore[attr-defined]
             source: QComboBox = controls["source"]  # type: ignore[assignment]
-            if camera.device and source.findText(camera.device) < 0:
-                source.addItem(camera.device)
-            source.setCurrentText(camera.device or "")
+            self._select_source(source, camera.device or "")
             role: QComboBox = controls["role"]  # type: ignore[assignment]
             role.setCurrentIndex(max(0, role.findData(camera.role)))
             controls["entry_direction"].setCurrentText(camera.entry_direction)  # type: ignore[attr-defined]
             controls["exit_direction"].setCurrentText(camera.exit_direction)  # type: ignore[attr-defined]
 
+    @staticmethod
+    def _source(combo: QComboBox) -> str:
+        index = combo.currentIndex()
+        if index >= 0 and combo.currentText() == combo.itemText(index):
+            data = combo.itemData(index)
+            if isinstance(data, str):
+                return data
+        return combo.currentText().strip()
+
+    @staticmethod
+    def _select_source(combo: QComboBox, value: str) -> None:
+        if not value:
+            combo.setCurrentText("")
+            return
+        index = next(
+            (i for i in range(combo.count()) if combo.itemData(i) == value), -1
+        )
+        if index < 0:
+            # Preserve the real URI in item data but mask saved credentials.
+            from urllib.parse import urlsplit
+            parsed = urlsplit(value)
+            label = (
+                f"{parsed.scheme}://***@{parsed.hostname}{':' + str(parsed.port) if parsed.port else ''}{parsed.path}"
+                if parsed.scheme.lower() in {"rtsp", "rtsps"} and parsed.password
+                else value
+            )
+            combo.addItem(label, value)
+            index = combo.count() - 1
+        combo.setCurrentIndex(index)
+
     def set_discovered(self, sources: list[str]) -> None:
         for controls in self.cards.values():
             combo: QComboBox = controls["source"]  # type: ignore[assignment]
-            current = combo.currentText()
-            combo.clear()
-            combo.addItems(sources)
-            if current and combo.findText(current) < 0:
-                combo.addItem(current)
-            combo.setCurrentText(current)
-        self.discovery_status.setText(f"{len(sources)} Videoquelle(n) gefunden")
+            current = self._source(combo)
+            for source in sources:
+                if source and not any(combo.itemData(i) == source for i in range(combo.count())):
+                    combo.addItem(source, source)
+            self._select_source(combo, current)
+        self.discovery_status.setText(f"{len(sources)} USB-Videoquelle(n) gefunden")
+
+    def set_discovered_network(self, sources: list[str]) -> None:
+        for controls in self.cards.values():
+            combo: QComboBox = controls["source"]  # type: ignore[assignment]
+            for source in sources:
+                if not any(combo.itemData(i) == source for i in range(combo.count())):
+                    combo.addItem(source, source)
+        self.discovery_status.setText(
+            f"{len(sources)} RTSP-Kandidat(en) · Quelle auswählen, Zugangsdaten eingeben"
+            if sources else "Keine RTSP-Geräte gefunden. IP/Subnetz oder Routerroute prüfen."
+        )
+
+    def _apply_reolink(self, camera_id: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        controls = self.cards[camera_id]
+        try:
+            url = reolink_rtsp_url(
+                controls["ip_address"].text().strip(),  # type: ignore[attr-defined]
+                controls["camera_user"].text().strip(),  # type: ignore[attr-defined]
+                controls["camera_password"].text(),  # type: ignore[attr-defined]
+                stream=str(controls["stream"].currentData()),  # type: ignore[attr-defined]
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Kamera-IP prüfen", str(exc))
+            return
+        combo: QComboBox = controls["source"]  # type: ignore[assignment]
+        self._select_source(combo, url)
+        controls["camera_password"].clear()  # type: ignore[attr-defined]
+        self.discovery_status.setText(
+            "RTSP-Quelle vorbereitet. Verbindung testen und Einstellungen speichern."
+        )
 
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for camera in snapshot.cameras:
@@ -239,20 +341,20 @@ class CamerasPage(BasePage):
     def set_test_result(self, source: str, ok: bool, message: str) -> None:
         for controls in self.cards.values():
             combo: QComboBox = controls["source"]  # type: ignore[assignment]
-            if combo.currentText() == source:
+            if self._source(combo) == source:
                 badge: StatusBadge = controls["status"]  # type: ignore[assignment]
                 badge.set_state("ok" if ok else "error", message)
 
     def _test(self, camera_id: str) -> None:
         combo: QComboBox = self.cards[camera_id]["source"]  # type: ignore[assignment]
-        self.test_requested.emit(combo.currentText().strip())
+        self.test_requested.emit(self._source(combo))
 
     def _emit_save(self) -> None:
         values: dict[str, dict[str, str]] = {}
         for camera_id, controls in self.cards.items():
             values[camera_id] = {
                 "display_name": controls["name"].text().strip(),  # type: ignore[attr-defined]
-                "device": controls["source"].currentText().strip(),  # type: ignore[attr-defined]
+                "device": self._source(controls["source"]),  # type: ignore[arg-type]
                 "role": str(controls["role"].currentData()),  # type: ignore[attr-defined]
                 "entry_direction": controls["entry_direction"].currentText(),  # type: ignore[attr-defined]
                 "exit_direction": controls["exit_direction"].currentText(),  # type: ignore[attr-defined]
