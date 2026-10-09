@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-import cv2
 from PySide6.QtCore import QSettings, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
