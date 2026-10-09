@@ -19,19 +19,28 @@ fi
 
 log "Installiere Systemabhaengigkeiten ..."
 sudo apt-get update
+GLIB_PKG="libglib2.0-0t64"
+if ! apt-cache show "$GLIB_PKG" >/dev/null 2>&1; then
+  GLIB_PKG="libglib2.0-0"
+fi
 sudo apt-get install -y \
   python3 python3-venv python3-pip python3-dev \
-  v4l-utils libgl1 libglib2.0-0 libxcb-cursor0 \
-  wmctrl util-linux
+  v4l-utils libgl1 "$GLIB_PKG" libxcb-cursor0 \
+  wmctrl util-linux iproute2 ffmpeg dkms
 
 # The desktop/setup/diagnostic UI must still install when the AI hardware is
 # temporarily disconnected or the vendor packages are not yet configured.
 if ! command -v hailortcli >/dev/null 2>&1; then
-  if command -v apt-cache >/dev/null 2>&1 && apt-cache show hailo-all >/dev/null 2>&1; then
-    log "HailoRT fehlt. Versuche das verfügbare Raspberry-Pi-Paket hailo-all ..."
-    sudo apt-get install -y hailo-all || log "WARNUNG: hailo-all konnte nicht installiert werden."
+  # Hailo-10H / AI HAT+ 2 uses hailo-h10-all, NOT hailo-all (Hailo-8/8L).
+  if apt-cache show hailo-h10-all >/dev/null 2>&1; then
+    log "Installiere den Raspberry-Pi-Hailo-10H-Treiber (hailo-h10-all) ..."
+    if sudo apt-get install -y hailo-h10-all; then
+      log "Hailo-10H-Treiber installiert. Ein Neustart kann zur Aktivierung nötig sein."
+    else
+      log "WARNUNG: hailo-h10-all konnte nicht installiert werden. GUI/Diagnose bleiben verfügbar."
+    fi
   else
-    log "WARNUNG: Kein HailoRT/hailo-all verfügbar. Die GUI kann trotzdem eingerichtet werden."
+    log "WARNUNG: Hailo-10H-Paket nicht im aktuellen apt-Repository; Raspberry Pi OS und Paketquellen prüfen."
   fi
 fi
 
