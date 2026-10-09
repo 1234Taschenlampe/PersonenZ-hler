@@ -2,7 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 unit_dir="$HOME/.config/systemd/user"
-config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/personenzaehler"
+config_base="${XDG_CONFIG_HOME:-$HOME/.config}"
+data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
+state_base="${XDG_STATE_HOME:-$HOME/.local/state}"
+cache_base="${XDG_CACHE_HOME:-$HOME/.cache}"
+config_dir="$config_base/personenzaehler"
 mkdir -p "$unit_dir" "$config_dir" "$PWD/logs"
 service="$unit_dir/visitor-counter.service"
 secrets="$config_dir/api.env"
@@ -29,6 +33,10 @@ Type=simple
 WorkingDirectory=$PWD
 Environment=PYTHONPATH=$PWD/src
 Environment=PERSONENZAEHLER_USE_XDG=${PERSONENZAEHLER_USE_XDG:-1}
+Environment="XDG_CONFIG_HOME=$config_base"
+Environment="XDG_DATA_HOME=$data_base"
+Environment="XDG_STATE_HOME=$state_base"
+Environment="XDG_CACHE_HOME=$cache_base"
 EnvironmentFile=-$secrets
 ExecStart=$PWD/.venv/bin/python -m visitor_counter.app --project-root $PWD
 ExecStop=/usr/bin/touch $PWD/logs/visitor_counter.stop
@@ -63,6 +71,10 @@ Type=simple
 WorkingDirectory=$PWD
 Environment=PYTHONPATH=$PWD/src
 Environment=PERSONENZAEHLER_USE_XDG=1
+Environment="XDG_CONFIG_HOME=$config_base"
+Environment="XDG_DATA_HOME=$data_base"
+Environment="XDG_STATE_HOME=$state_base"
+Environment="XDG_CACHE_HOME=$cache_base"
 EnvironmentFile=-$secrets
 ExecCondition=$PWD/.venv/bin/python $PWD/scripts/service_preflight.py --project-root $PWD
 ExecStart=$PWD/.venv/bin/python -m visitor_counter.service --project-root $PWD
@@ -92,6 +104,10 @@ Type=simple
 WorkingDirectory=$PWD
 Environment=PYTHONPATH=$PWD/src
 Environment=PERSONENZAEHLER_USE_XDG=1
+Environment="XDG_CONFIG_HOME=$config_base"
+Environment="XDG_DATA_HOME=$data_base"
+Environment="XDG_STATE_HOME=$state_base"
+Environment="XDG_CACHE_HOME=$cache_base"
 EnvironmentFile=-$secrets
 ExecStart=$PWD/.venv/bin/python $PWD/scripts/status_api.py --project-root $PWD --config $config_file
 Restart=on-failure
