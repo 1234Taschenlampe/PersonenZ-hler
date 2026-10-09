@@ -29,19 +29,11 @@ def _event(timestamp: float | None = None) -> CrossingEvent:
     )
 
 
-def test_privacy_readiness_fails_closed_until_operator_documents_context() -> None:
+def test_privacy_readiness_allows_optional_operator_metadata_but_not_disabled_privacy() -> None:
     config = AppConfig()
-    errors = privacy_readiness_errors(config)
-    assert any("notice" in error.lower() for error in errors)
-    assert any("legal basis" in error.lower() for error in errors)
-    assert any("controller" in error.lower() for error in errors)
-
-    config.privacy.privacy_notice_acknowledged = True
-    config.privacy.privacy_notice_acknowledged_at = "2026-07-13T20:00:00+02:00"
-    config.privacy.legal_basis = "documented assessment"
-    config.privacy.controller_name = "Example Controller"
-    config.privacy.controller_contact = "privacy@example.invalid"
     assert privacy_readiness_errors(config) == []
+    config.privacy.enabled = False
+    assert any("privacy" in error.lower() for error in privacy_readiness_errors(config))
 
 
 def test_full_frame_anonymization_and_hidden_preview_remove_detail() -> None:
