@@ -40,10 +40,16 @@ _RATE_LIMITS: dict[str, tuple[int, int]] = {}
 ROLE_LEVEL = {"anonymous": 0, "viewer": 1, "operator": 2, "admin": 3}
 
 
-def _read_live_status(project_root: Path) -> dict | None:
+def _read_live_status(project_root: Path, config: AppConfig | None = None) -> dict | None:
     try:
+        configured = Path(config.database.path).expanduser() if config else None
+        fallback = (
+            configured.parent
+            if configured is not None and configured.is_absolute()
+            else project_root / "data"
+        )
         data_dir = Path(
-            os.environ.get("PERSONENZAEHLER_DATA_DIR", str(project_root / "data"))
+            os.environ.get("PERSONENZAEHLER_DATA_DIR", str(fallback))
         )
         live_status_path = data_dir / "live_status.json"
         if not live_status_path.exists():
@@ -67,7 +73,7 @@ def build_status(project_root: Path) -> dict:
     detector = ModelManager(config.model, project_root).status()
     reid = OSNetReIDManager(config.model, project_root).status(validate_hailo=False)
     db_path = project_root / config.database.path
-    live = _read_live_status(project_root)
+    live = _read_live_status(project_root, config)
     if live:
         counts = live.get("counts", _counts_status(project_root, config))
         cameras = [
