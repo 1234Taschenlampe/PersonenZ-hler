@@ -211,6 +211,7 @@ class CameraPreviewPanel(QWidget):
         for camera_id in list(self._tiles):
             if camera_id not in target or self._tiles[camera_id].name != target[camera_id][0]:
                 tile = self._tiles.pop(camera_id)
+                self.grid.removeWidget(tile)
                 tile.setParent(None)
                 tile.deleteLater()
                 self._last_images.pop(camera_id, None)
@@ -225,8 +226,16 @@ class CameraPreviewPanel(QWidget):
                 if reader is not None:
                     self._stop_reader(camera_id)
                 reader = _PreviewReader(camera_id, source, self)
-                reader.image_ready.connect(self._on_image)
-                reader.failed.connect(self._on_failure)
+                reader.image_ready.connect(
+                    lambda cid, image, r=reader: (
+                        self._on_image(cid, image) if self._readers.get(cid) is r else None
+                    )
+                )
+                reader.failed.connect(
+                    lambda cid, message, r=reader: (
+                        self._on_failure(cid, message) if self._readers.get(cid) is r else None
+                    )
+                )
                 self._readers[camera_id] = reader
                 self._tiles[camera_id].clear_image()
                 reader.start()
@@ -294,9 +303,11 @@ class CameraPreviewPanel(QWidget):
         if reader is None:
             return
         reader.stop()
-        if reader.isRunning():
-            self._retiring.add(reader)
-            reader.finished.connect(lambda r=reader: self._retiring.discard(r))
+        if reader.isFinished():
+            reader.deleteLater()
+            return
+        self._retiring.add(reader)
+        reader.finished.connect(lambda r=reader: self._retiring.discard(r))
         reader.finished.connect(reader.deleteLater)
 
     def _stop_all(self) -> None:
