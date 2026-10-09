@@ -165,6 +165,7 @@ class MainWindow(QMainWindow):
         hardware: HardwarePage = self.pages["KI & Hardware"]  # type: ignore[assignment]
         hardware.diagnose_requested.connect(self._run_diagnostics)
         hardware.model_import_requested.connect(self._import_model)
+        hardware.model_download_requested.connect(self._download_official_models)
         system: SystemPage = self.pages["System"]  # type: ignore[assignment]
         system.service_action_requested.connect(self._service_action)
         system.logs_requested.connect(self._load_logs)
@@ -327,6 +328,34 @@ class MainWindow(QMainWindow):
             ),
             page.set_report,
         )
+
+    def _download_official_models(self) -> None:
+        self.global_status.setText("Offizielle Hailo-Modelle werden geprüft und geladen …")
+        page: HardwarePage = self.pages["KI & Hardware"]  # type: ignore[assignment]
+        page.details.setPlainText(
+            "Download über Hailo Model Zoo: YOLO26m (5.4.0) / OSNet (5.3.0). "
+            "Die vorhandenen SHA-256-Manifeste werden strikt geprüft. "
+            "Bitte währenddessen keine Modelle manuell ersetzen."
+        )
+
+        def download_all() -> list[str]:
+            messages: list[str] = []
+            for kind in ("detector", "reid"):
+                model = self.model_installation.download_official(kind)
+                messages.append(
+                    f"{kind}: {model.path.name} ({model.size_bytes} Bytes), SHA-256 korrekt"
+                )
+            return messages
+
+        def finished(messages: list[str]) -> None:
+            QMessageBox.information(
+                self, "Offizielle Modelle installiert",
+                "\n".join(messages)
+                + "\n\nDie echte Hailo-Inferenz muss noch am Pi geprüft werden.",
+            )
+            self._run_diagnostics()
+
+        self._run_worker(download_all, finished)
 
     def _import_model(self, kind: str, source: Path) -> None:
         self.global_status.setText("Modell wird sicher importiert …")
