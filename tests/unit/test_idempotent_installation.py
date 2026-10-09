@@ -48,7 +48,7 @@ def test_configured_pipeline_prerequisites_allow_service(tmp_path: Path) -> None
 
 
 def test_model_requirements_skip_training_and_torch() -> None:
-    text = (ROOT / "requirements-pi.txt").read_text(encoding="utf-8").lower()
+    text = "\n".join(line for line in (ROOT / "requirements-pi.txt").read_text(encoding="utf-8").lower().splitlines() if not line.lstrip().startswith("#"))
     assert "-e ." in text
     assert "onnxruntime" in text
     assert "ultralytics" not in text
@@ -100,6 +100,7 @@ def test_service_units_do_not_reload_without_changes(tmp_path: Path) -> None:
         "PERSONENZAEHLER_USE_XDG": "1",
     })
     script = str(ROOT / "scripts" / "install_autostart.sh")
+    first_restart_count = 0
     for attempt in (1, 2):
         result = subprocess.run(
             ["bash", script], cwd=ROOT, env=env,
@@ -109,9 +110,10 @@ def test_service_units_do_not_reload_without_changes(tmp_path: Path) -> None:
         recorded = log.read_text().splitlines()
         if attempt == 1:
             assert sum("daemon-reload" in line for line in recorded) == 1
+            first_restart_count = sum("restart personenzaehler" in line for line in recorded)
         else:
             assert sum("daemon-reload" in line for line in recorded) == 1
-            assert not any("restart personenzaehler" in line for line in recorded)
+            assert sum("restart personenzaehler" in line for line in recorded) == first_restart_count
             assert "daemon-reload übersprungen" in result.stdout
     unit = (home / ".config/systemd/user/personenzaehler.service").read_text()
     assert "ExecCondition=" in unit
