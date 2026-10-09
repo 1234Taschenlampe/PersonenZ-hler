@@ -31,7 +31,7 @@ from ..diagnostics import (
 )
 from ..license_guard import LicenseError
 from ..model_installation import ModelInstallationService
-from ..network_camera_discovery import scan_rtsp_network
+from ..network_camera_discovery import discover_network_cameras
 from ..runtime_paths import RuntimePaths
 from ..security_assets import SecurityAssetService
 from ..settings_service import SettingsError, SettingsService
@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
                 camera.role = camera_values["role"]
                 camera.entry_direction = camera_values["entry_direction"]
                 camera.exit_direction = camera_values["exit_direction"]
+                camera.counting_mode = camera_values["counting_mode"]
             self.settings_service.save(config)
         except SettingsError as exc:
             QMessageBox.warning(self, "Kameras nicht gespeichert", str(exc))
@@ -271,14 +272,14 @@ class MainWindow(QMainWindow):
             ]
 
         page: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
-        page.discovery_status.setText("Suche läuft …")
+        page.discovery_status.setText("USB-Gerätesuche läuft … (IP-Kameras sind davon unabhängig)")
         self._run_worker(discover, page.set_discovered)
 
     def _scan_network_cameras(self, subnet: str) -> None:
         page: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
-        page.discovery_status.setText("RTSP-Geräte werden im lokalen Netz gesucht …")
+        page.discovery_status.setText("Suche: RTSP-TCP und ONVIF-Netzwerkerkennung …")
         self._run_worker(
-            lambda: [item.url_template for item in scan_rtsp_network(subnet)],
+            lambda: discover_network_cameras(subnet),
             page.set_discovered_network,
         )
 
@@ -290,27 +291,25 @@ class MainWindow(QMainWindow):
             return
 
         def probe() -> tuple[str, bool, str]:
-            if source.lower().startswith(("rtsp://", "rtsps://")):
-                capture = cv2.VideoCapture(
-                    source,
-                    cv2.CAP_FFMPEG,
-                    [
-                        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000,
-                        cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000,
-                    ],
-                )
-            else:
-                capture = cv2.VideoCapture(
-                    int(source) if source.isdigit() else source
-                )
+            from ..camera_manager import open_camera_source
+
+            capture = open_camera_source(source, timeout_ms=5000)
             try:
                 if not capture.isOpened():
-                    return source, False, "Nicht erreichbar"
+                    return (
+                        source, False,
+                        "RTSP-Zugriff fehlgeschlagen: IP, Port 554/8554, Kamera-RTSP "
+                        "und Benutzer/Passwort prüfen"
+                    )
                 ok, frame = capture.read()
-                if not ok or frame is None:
-                    return source, False, "Kein Videoframe"
+                if not ok or frame is None or frame.size == 0:
+                    return (
+                        source, False,
+                        "RTSP-Port erreichbar, aber kein Videobild. "
+                        "Reolink Substream/Hauptstream, Login oder H.264 prüfen"
+                    )
                 height, width = frame.shape[:2]
-                return source, True, f"Bereit · {width}×{height}"
+                return source, True, f"Videoframe empfangen · {width}×{height}"
             finally:
                 capture.release()
 
