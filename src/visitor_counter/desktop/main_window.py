@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-import cv2
 from PySide6.QtCore import QSettings, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -31,7 +30,7 @@ from ..diagnostics import (
 )
 from ..license_guard import LicenseError
 from ..model_installation import ModelInstallationService
-from ..network_camera_discovery import scan_rtsp_network
+from ..network_camera_discovery import discover_network_cameras
 from ..runtime_paths import RuntimePaths
 from ..security_assets import SecurityAssetService
 from ..settings_service import SettingsError, SettingsService
@@ -249,19 +248,45 @@ class MainWindow(QMainWindow):
     def _save_cameras(self, values: dict[str, dict[str, str]]) -> None:
         try:
             config = self.settings_service.load()
+            changed = False
             for camera_id, camera_values in values.items():
                 camera = config.cameras[camera_id]
-                camera.display_name = camera_values["display_name"] or camera_id
-                camera.device = camera_values["device"] or None
-                camera.role = camera_values["role"]
-                camera.entry_direction = camera_values["entry_direction"]
-                camera.exit_direction = camera_values["exit_direction"]
-            self.settings_service.save(config)
+                new_values = {
+                    "display_name": camera_values["display_name"] or camera_id,
+                    "device": camera_values["device"] or None,
+                    "role": camera_values["role"],
+                    "entry_direction": camera_values["entry_direction"],
+                    "exit_direction": camera_values["exit_direction"],
+                    "counting_mode": camera_values["counting_mode"],
+                }
+                for field, value in new_values.items():
+                    if getattr(camera, field) != value:
+                        changed = True
+                        setattr(camera, field, value)
+            if changed:
+                self.settings_service.save(config)
         except SettingsError as exc:
             QMessageBox.warning(self, "Kameras nicht gespeichert", str(exc))
             return
-        self.global_status.setText("Kamerakonfiguration gespeichert")
-        self.refresh()
+        if not changed:
+            self.global_status.setText("Kameraeinstellungen unverändert")
+            return
+        self.global_status.setText("Kameraeinstellungen gespeichert; Zähldienst wird aktualisiert …")
+
+        # The headless worker holds its camera URLs in memory. A changed IP,
+        # password or streaming profile needs a restart to take effect.
+        # Do not start an intentionally stopped/unconfigured service.
+        def reload_if_running() -> str:
+            manager = self.application_service.service_manager
+            if manager.status().active_state != "active":
+                return "Gespeichert. Zähldienst ist noch gestoppt; unter System starten."
+            manager.action("restart")
+            return "Kameraeinstellungen übernommen; Zähldienst neu gestartet."
+
+        self._run_worker(
+            reload_if_running,
+            lambda message: (self.global_status.setText(message), self.refresh()),
+        )
 
     def _discover_cameras(self) -> None:
         def discover() -> list[str]:
@@ -271,14 +296,14 @@ class MainWindow(QMainWindow):
             ]
 
         page: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
-        page.discovery_status.setText("Suche läuft …")
+        page.discovery_status.setText("USB-Gerätesuche läuft … (IP-Kameras sind davon unabhängig)")
         self._run_worker(discover, page.set_discovered)
 
     def _scan_network_cameras(self, subnet: str) -> None:
         page: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
-        page.discovery_status.setText("RTSP-Geräte werden im lokalen Netz gesucht …")
+        page.discovery_status.setText("Suche: RTSP-TCP und ONVIF-Netzwerkerkennung …")
         self._run_worker(
-            lambda: [item.url_template for item in scan_rtsp_network(subnet)],
+            lambda: discover_network_cameras(subnet),
             page.set_discovered_network,
         )
 
@@ -290,27 +315,25 @@ class MainWindow(QMainWindow):
             return
 
         def probe() -> tuple[str, bool, str]:
-            if source.lower().startswith(("rtsp://", "rtsps://")):
-                capture = cv2.VideoCapture(
-                    source,
-                    cv2.CAP_FFMPEG,
-                    [
-                        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000,
-                        cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000,
-                    ],
-                )
-            else:
-                capture = cv2.VideoCapture(
-                    int(source) if source.isdigit() else source
-                )
+            from ..camera_manager import open_camera_source
+
+            capture = open_camera_source(source, timeout_ms=5000)
             try:
                 if not capture.isOpened():
-                    return source, False, "Nicht erreichbar"
+                    return (
+                        source, False,
+                        "RTSP-Zugriff fehlgeschlagen: IP, Port 554/8554, Kamera-RTSP "
+                        "und Benutzer/Passwort prüfen"
+                    )
                 ok, frame = capture.read()
-                if not ok or frame is None:
-                    return source, False, "Kein Videoframe"
+                if not ok or frame is None or frame.size == 0:
+                    return (
+                        source, False,
+                        "RTSP-Port erreichbar, aber kein Videobild. "
+                        "Reolink Substream/Hauptstream, Login oder H.264 prüfen"
+                    )
                 height, width = frame.shape[:2]
-                return source, True, f"Bereit · {width}×{height}"
+                return source, True, f"Videoframe empfangen · {width}×{height}"
             finally:
                 capture.release()
 

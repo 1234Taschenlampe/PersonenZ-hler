@@ -101,7 +101,9 @@ class FirstRunWizard(QWizard):
         camera_page = QWizardPage()
         camera_page.setTitle("Kameras")
         camera_page.setSubTitle(
-            "USB-Quellen werden erkannt. Reolink-IP-Kameras später unter Kameras im LAN suchen oder manuell eintragen."
+            "Diese Liste zeigt nur USB-Webcams. Bereits gespeicherte Reolink-RTSP-"
+            "Kameras funktionieren unabhängig davon. IP-Kameras anschließend "
+            "unter Kameras über RTSP + ONVIF suchen."
         )
         camera_layout = QFormLayout(camera_page)
         discovered = discover_camera_devices()
@@ -140,7 +142,10 @@ class FirstRunWizard(QWizard):
         camera_layout.addRow("Kamera 2", self.camera_2)
         camera_layout.addRow("Rolle Kamera 2", self.camera_2_role)
         camera_layout.addRow(
-            QLabel(f"Automatisch erkannte Bildquellen: {len(sources)}")
+            QLabel(
+                f"USB-Webcams: {len(sources)} (keine Aussage über RTSP-Kameras). "
+                "Netzwerkkameras unter Kameras suchen und Videoframe testen."
+            )
         )
         self.addPage(camera_page)
 

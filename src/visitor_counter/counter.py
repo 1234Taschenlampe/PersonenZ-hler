@@ -28,6 +28,9 @@ class _TrackMemory:
     counted: bool = False
     last_count_time: float = 0.0
     previous_center: tuple[float, float] | None = None
+    initial_side: str | None = None
+    last_confirmed_track: TrackedObject | None = None
+    last_near_edge: bool = False
 
 
 class LineCrossingCounter:
@@ -59,7 +62,10 @@ class LineCrossingCounter:
         self._tracks.clear()
         LOGGER.info("Counter reset for %s", self.camera_id)
 
-    def update(self, frame_id: int, tracks: list[TrackedObject]) -> list[CrossingEvent]:
+    def update(
+        self, frame_id: int, tracks: list[TrackedObject],
+        frame_size: tuple[int, int] | None = None,
+    ) -> list[CrossingEvent]:
         events: list[CrossingEvent] = []
         self.counts.visible = len(
             {
@@ -69,8 +75,17 @@ class LineCrossingCounter:
             }
         )
         camera_num = 1 if self.camera_id == "camera_1" else 2
+        frame_width, frame_height = frame_size or (
+            self.camera_config.width, self.camera_config.height
+        )
+        if frame_width <= 0 or frame_height <= 0:
+            return []
 
         for track in tracks:
+            # The tracker returns stale boxes while a person is temporarily
+            # occluded. Never treat these coordinates as real observations.
+            if track.lost_frames > 0:
+                continue
             # Check bounding box validity and area first
             if track.bbox.width <= 1 or track.bbox.height <= 1:
                 LOGGER.debug("COUNT_REJECTED camera=%s reason=invalid_bbox", camera_num)
@@ -87,7 +102,14 @@ class LineCrossingCounter:
             anchor = track.bbox.center
 
             # Compute distance in pixels to line
-            side = self.line.side(anchor)
+            # Camera configuration uses reference dimensions (usually 1280x720),
+            # while Reolink's substream may be 640x360 or 640x480.
+            # Normalize into the configured counting-line coordinate system.
+            point = (
+                anchor[0] * self.camera_config.width / frame_width,
+                anchor[1] * self.camera_config.height / frame_height,
+            )
+            side = self.line.side(point)
             distance = side / self.line_length
 
             # Determine raw zone
@@ -125,6 +147,16 @@ class LineCrossingCounter:
 
             memory.previous_center = anchor
             memory.last_seen_frame = frame_id
+            if track.confirmed:
+                memory.last_confirmed_track = track
+            margin = min(
+                self.camera_config.edge_margin_pixels,
+                max(1, min(frame_width, frame_height) // 3),
+            )
+            memory.last_near_edge = (
+                anchor[0] <= margin or anchor[0] >= frame_width - margin
+                or anchor[1] <= margin or anchor[1] >= frame_height - margin
+            )
 
             # Update raw zone history
             memory.raw_zone_history.append(raw_zone)
@@ -147,31 +179,50 @@ class LineCrossingCounter:
                         limit,
                     )
                     memory.stable_zone = new_stable
+                    if new_stable in ("A", "B") and memory.initial_side is None:
+                        memory.initial_side = new_stable
                     if (
                         not memory.stable_zone_history
                         or memory.stable_zone_history[-1] != new_stable
                     ):
                         memory.stable_zone_history.append(new_stable)
                         # Process potential transition
-                        events.extend(self._process_transition(track, memory, frame_id))
+                        if self.camera_config.counting_mode == "line":
+                            events.extend(self._process_transition(track, memory, frame_id))
             else:
                 # No stable zone change this frame
                 LOGGER.debug(
                     "COUNT_REJECTED camera=%s reason=no_zone_change", camera_num
                 )
 
-        # Cleanup expired tracks
-        for track_id in list(self._tracks.keys()):
+        # Confirm a passage at disappearance only when the person has a
+        # verified A->B/B->A transition AND was last seen near a real image
+        # boundary. Mid-frame occlusions and temporary tracker loss never count.
+        visible_ids = {track.track_id for track in tracks if track.lost_frames == 0}
+        for track_id, memory in list(self._tracks.items()):
+            missing_frames = frame_id - memory.last_seen_frame
             if (
-                frame_id - self._tracks[track_id].last_seen_frame
-                > self.tracking_config.maximum_track_age
+                self.camera_config.counting_mode == "exit_edge"
+                and track_id not in visible_ids
+                and missing_frames >= self.camera_config.disappearance_frames
+                and not memory.counted
+                and memory.last_near_edge
+                and memory.last_confirmed_track is not None
             ):
+                events.extend(
+                    self._process_transition(
+                        memory.last_confirmed_track, memory, frame_id,
+                        on_disappearance=True,
+                    )
+                )
+            if missing_frames > self.tracking_config.maximum_track_age:
                 del self._tracks[track_id]
 
         return events
 
     def _process_transition(
-        self, track: TrackedObject, memory: _TrackMemory, frame_id: int
+        self, track: TrackedObject, memory: _TrackMemory, frame_id: int,
+        *, on_disappearance: bool = False,
     ) -> list[CrossingEvent]:
         # We need at least two stable zones to see a transition
         if len(memory.stable_zone_history) < 2:
@@ -189,6 +240,11 @@ class LineCrossingCounter:
                 break
 
         if not prev_non_neutral or prev_non_neutral == current_stable:
+            return []
+        if on_disappearance and (
+            memory.initial_side != prev_non_neutral
+            or not memory.last_near_edge
+        ):
             return []
 
         # We have a transition! Either A -> B or B -> A
@@ -266,6 +322,8 @@ class LineCrossingCounter:
                 "transition": transition,
                 "anchor": track.bbox.center,
                 "zones": list(memory.stable_zone_history),
+                "counting_mode": self.camera_config.counting_mode,
+                "confirmed_at_exit_edge": on_disappearance,
             },
         )
 
