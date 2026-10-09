@@ -233,6 +233,7 @@ class CameraCapture(Thread):
         self.stats = CameraStats()
         self._frame_id = 0
         self._reconnect_delay_seconds = 1.0
+        self._max_reconnect_delay_seconds = 12.0
 
     def run(self) -> None:
         while not self.stop_event.is_set():
@@ -241,22 +242,28 @@ class CameraCapture(Thread):
                 self.stats.connected = False
                 self.stats.state = "OFFLINE"
                 self.stats.last_error = "No camera source configured or discovered"
-                sleep(1.0)
+                self.stop_event.wait(1.0)
                 continue
             self.stats.source = _safe_source_for_log(source)
             self.stats.transport = camera_source_kind(source)
             self.stats.state = "CONNECTING" if self.stats.reconnect_count == 0 else "RECONNECTING"
-            capture = self._open_capture(source)
+            try:
+                capture = self._open_capture(source)
+            except (OSError, cv2.error, TypeError, ValueError) as exc:
+                self._mark_failure(
+                    f"Videoöffnung fehlgeschlagen ({type(exc).__name__}); Netzwerk/RTSP prüfen"
+                )
+                self.stop_event.wait(self._reconnect_delay_seconds)
+                self._reconnect_delay_seconds = min(
+                    self._max_reconnect_delay_seconds, self._reconnect_delay_seconds * 1.8
+                )
+                continue
             try:
                 if not capture.isOpened():
                     self._mark_failure(f"Cannot open camera {self.stats.source}")
-                    sleep(self._reconnect_delay_seconds)
                     continue
                 self._configure_capture(capture, source)
-                self.stats.connected = True
-                self.stats.state = "ONLINE"
-                self.stats.last_error = ""
-                self.stats.connected_since = time()
+                # isOpened() alone is NOT proof that an RTSP stream sends frames.
                 self._capture_loop(capture)
             finally:
                 capture.release()
@@ -265,12 +272,22 @@ class CameraCapture(Thread):
                 self.stats.connected = False
                 if not self.stop_event.is_set():
                     self.stats.state = "RECONNECTING"
-                    sleep(self._reconnect_delay_seconds)
+                    self.stop_event.wait(self._reconnect_delay_seconds)
+                    self._reconnect_delay_seconds = min(
+                        self._max_reconnect_delay_seconds,
+                        self._reconnect_delay_seconds * 1.8,
+                    )
         self.stats.state = "OFFLINE"
 
     def _open_capture(self, source: str) -> cv2.VideoCapture:
         if is_network_camera_source(source):
-            return cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+            return cv2.VideoCapture(
+                source, cv2.CAP_FFMPEG,
+                [
+                    cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                    cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000,
+                ],
+            )
         return cv2.VideoCapture(source, cv2.CAP_V4L2)
 
     def _configure_capture(self, capture: cv2.VideoCapture, source: str) -> None:
@@ -284,6 +301,7 @@ class CameraCapture(Thread):
 
     def _mark_failure(self, message: str) -> None:
         self.stats.connected = False
+        self.stats.fps = 0.0
         self.stats.state = "RECONNECTING"
         self.stats.last_error = message
         self.stats.reconnect_count += 1
@@ -296,9 +314,17 @@ class CameraCapture(Thread):
             ok, image = capture.read()
             if not ok or image is None or image.size == 0:
                 self.stats.decode_errors += 1
-                self.stats.last_error = "Camera read/decode failed; reconnecting"
+                self.stats.connected = False
+                self.stats.fps = 0.0
+                self.stats.last_error = "RTSP-Stream liefert keine Bilder; überprüfe Stream-Profil, Login, Netzwerk"
                 LOGGER.error("%s: %s", self.config.camera_id, self.stats.last_error)
                 break
+            if not self.stats.connected:
+                self.stats.connected = True
+                self.stats.state = "ONLINE"
+                self.stats.last_error = ""
+                self.stats.connected_since = time()
+                self._reconnect_delay_seconds = 1.0
             self._frame_id += 1
             captured_at = time()
             self.stats.last_frame_time = captured_at
