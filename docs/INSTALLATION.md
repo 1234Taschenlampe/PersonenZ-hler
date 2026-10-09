@@ -10,7 +10,7 @@ Primär unterstützt werden Raspberry Pi 5, aktuelles 64-Bit Raspberry Pi OS (Tr
 2. Das Paket doppelklicken und im grafischen Paketinstaller installieren.
 3. **PersonenZähler** im App-Menü öffnen.
 4. Im First-Run-Assistenten Betreiberangaben, Kameras, API und Lizenz einrichten.
-5. Unter **KI & Hardware** die beiden Hailo-10H-HEFs importieren und die Hardwareprüfung starten.
+5. Unter **KI & Hardware** die beiden offiziellen Hailo-10H-HEFs herunterladen (SHA-256-Prüfung) oder alternativ manuell importieren und die Hardwareprüfung starten.
 6. Unter **System** den Produktionsdienst starten.
 
 PolicyKit zeigt bei geschützten Aktionen den normalen Systemdialog. Die Desktop-Anwendung selbst erhält keine Root-Rechte.
@@ -41,6 +41,12 @@ Die Anwendung erwartet genau:
 
 - `yolo26m_detection_hailo10h_640.hef`
 - `osnet_x1_0_hailo10h.hef`
+
+Der grafische Originaldownload lädt die passenden Hailo-10H-HEFs direkt aus dem
+[Hailo Model Zoo](https://github.com/hailo-ai/hailo_model_zoo) und gleicht
+ihre SHA-256-Digests mit den bereits bestehenden Projektmanifests ab.
+Alternativ lassen sich eigene `.hef`-Dateien manuell importieren.
+Quellen und Lizenzhinweise: [MODEL_SOURCES_AND_CREDITS.md](MODEL_SOURCES_AND_CREDITS.md).
 
 Der grafische Import kopiert nur reguläre `.hef`-Dateien auf feste Ziele und lässt die Hardwareprüfung danach Modell, SHA-256 und Hailo-Zustand anzeigen. Fehlende Herstellerkomponenten werden nicht durch CPU-Inferenz ersetzt.
 
