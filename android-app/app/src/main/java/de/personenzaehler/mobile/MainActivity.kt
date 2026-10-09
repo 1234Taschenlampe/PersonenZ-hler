@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
@@ -46,6 +48,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +63,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -140,15 +146,31 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun PersonenzaehlerTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = lightColorScheme(
-            primary = Color(0xFF315F56),
-            secondary = Color(0xFFE8B84E),
-            tertiary = Color(0xFF5B6C8D),
+    val dark = isSystemInDarkTheme()
+    val colors = if (dark) {
+        darkColorScheme(
+            primary = Color(0xFF8CD8CB),
+            onPrimary = Color(0xFF00382F),
+            primaryContainer = Color(0xFF145449),
+            secondary = Color(0xFFAFC3DD),
+            background = Color(0xFF101718),
+            surface = Color(0xFF172021),
+            surfaceVariant = Color(0xFF253132),
+            error = Color(0xFFFFB4AB),
+        )
+    } else {
+        lightColorScheme(
+            primary = Color(0xFF006B5C),
+            onPrimary = Color.White,
+            primaryContainer = Color(0xFFB6F1E3),
+            secondary = Color(0xFF445B74),
+            background = Color(0xFFF6F8F8),
+            surface = Color.White,
+            surfaceVariant = Color(0xFFEAF1F1),
             error = Color(0xFFB3261E),
-        ),
-        content = content,
-    )
+        )
+    }
+    MaterialTheme(colorScheme = colors, content = content)
 }
 
 @Composable
@@ -159,7 +181,7 @@ private fun NotificationPermissionRequest() {
 }
 
 private enum class Screen(val route: String, val label: String, val icon: ImageVector) {
-    Dashboard("dashboard", "Dashboard", Icons.Default.Dashboard),
+    Dashboard("dashboard", "Übersicht", Icons.Default.Dashboard),
     History("history", "Verlauf", Icons.Default.BarChart),
     Cameras("cameras", "Kameras", Icons.Default.CameraAlt),
     Events("events", "Ereignisse", Icons.Default.Event),
@@ -171,24 +193,40 @@ private enum class Screen(val route: String, val label: String, val icon: ImageV
 @Composable
 private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
     val navController = rememberNavController()
+    var moreExpanded by rememberSaveable { mutableStateOf(false) }
+    val primaryScreens = listOf(Screen.Dashboard, Screen.History, Screen.Cameras, Screen.Settings)
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Personenzaehler")
+                        Text("PersonenZähler", fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = if (state.connection.restConnected) "REST verbunden" else "REST getrennt",
+                            text = if (state.connection.restConnected) "Mit Raspberry Pi verbunden" else "Pi nicht erreichbar",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (state.connection.restConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                         )
                     }
                 },
                 actions = {
-                    OutlinedButton(onClick = viewModel::testConnection, modifier = Modifier.padding(end = 8.dp)) {
-                        Icon(Icons.Default.Refresh, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Aktualisieren")
+                    IconButton(onClick = viewModel::testConnection) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Daten aktualisieren")
+                    }
+                    Box {
+                        IconButton(onClick = { moreExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Weitere Bereiche")
+                        }
+                        DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                            listOf(Screen.Events, Screen.System).forEach { screen ->
+                                DropdownMenuItem(
+                                    text = { Text(screen.label) },
+                                    onClick = {
+                                        moreExpanded = false
+                                        navController.navigate(screen.route) { launchSingleTop = true }
+                                    },
+                                )
+                            }
+                        }
                     }
                 },
             )
@@ -197,12 +235,12 @@ private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
             NavigationBar {
                 val backStack by navController.currentBackStackEntryAsState()
                 val current = backStack?.destination
-                Screen.entries.forEach { screen ->
+                primaryScreens.forEach { screen ->
                     NavigationBarItem(
                         selected = current?.hierarchy?.any { it.route == screen.route } == true,
                         onClick = { navController.navigate(screen.route) { launchSingleTop = true } },
                         icon = { Icon(screen.icon, contentDescription = screen.label) },
-                        label = { Text(screen.label, fontSize = 10.sp) },
+                        label = { Text(screen.label, fontSize = 11.sp) },
                     )
                 }
             }
@@ -222,37 +260,36 @@ private fun PersonenzaehlerApp(state: MobileUiState, viewModel: MainViewModel) {
 @Composable
 private fun DashboardScreen(state: MobileUiState) {
     val status = state.status
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { StatusBanner(state) }
         item {
-            StatusBanner(state)
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                Column(Modifier.padding(18.dp)) {
-                    Text("Aktuell anwesend", style = MaterialTheme.typography.titleMedium)
-                    Text(formatInt(status?.counts?.inside), fontSize = 56.sp, fontWeight = FontWeight.Bold)
-                    Text("Letzte Aktualisierung: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Personen aktuell im Gebäude", style = MaterialTheme.typography.titleMedium)
+                    Text(formatInt(status?.counts?.inside), fontSize = 64.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Stand: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "noch keine Daten"}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
         item {
             MetricGrid(
                 listOf(
-                    "Eintritte gesamt" to formatInt(status?.counts?.entered),
-                    "Austritte gesamt" to formatInt(status?.counts?.exited),
                     "Besucher heute" to formatInt(status?.counts?.dailyUnique),
+                    "Eintritte" to formatInt(status?.counts?.entered),
+                    "Austritte" to formatInt(status?.counts?.exited),
                     "Gesamtdurchfluss" to formatInt(status?.counts?.throughput),
                     "Fehlrichtungen" to formatInt(status?.counts?.wrongWay),
-                    "Sichtbar global" to formatInt(status?.counts?.visible),
-                    "Suppressed" to formatInt(status?.counts?.suppressed),
-                    "Uncertain" to formatInt(status?.counts?.uncertain),
-                    "Letztes Ereignis" to formatEpochSeconds(status?.counts?.lastEventTime),
-                    "App-Laufzeit" to "N/A",
-                    "System-Uptime" to formatDuration(status?.host?.systemUptimeSeconds),
-                    "Datenbank" to if (status?.database?.exists == true) "OK" else "N/A",
-                    "API" to (status?.api?.name ?: "N/A"),
-                    "Hailo" to when (status?.hailo?.deviceDetected) { true -> "OK"; false -> "nicht verfuegbar"; null -> "N/A" },
-                    "Serverversion" to state.serverVersionText,
+                    "KI-Beschleuniger" to when (status?.hailo?.deviceDetected) {
+                        true -> "Verbunden"
+                        false -> "Nicht bereit"
+                        null -> "Unbekannt"
+                    },
                 ),
             )
         }
@@ -261,46 +298,49 @@ private fun DashboardScreen(state: MobileUiState) {
 
 @Composable
 private fun StatusBanner(state: MobileUiState) {
-    val color = when {
-        !state.connection.restConnected -> MaterialTheme.colorScheme.errorContainer
-        state.connection.stale -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
-    }
-    Card(colors = CardDefaults.cardColors(containerColor = color)) {
-        Column(Modifier.padding(14.dp)) {
-            Text(if (state.connection.restConnected) "Server verbunden" else "Keine Verbindung zum Server", fontWeight = FontWeight.Bold)
-            Text(state.connection.message)
-            Text("REST: ${if (state.connection.restConnected) "verbunden" else "getrennt"}")
-            Text("WebSocket: ${state.connection.webSocketStatus}")
-            Text("Endpunkt: ${state.connection.endpoint ?: state.settings.baseUrl}")
-            Text("HTTP: ${state.connection.httpStatus ?: "N/A"} | Antwortzeit: ${state.connection.responseTimeMs?.let { "$it ms" } ?: "N/A"}")
-            Text("Letzter REST-Erfolg: ${state.connection.lastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
-            Text("Letzter WebSocket-Empfang: ${state.connection.webSocketLastSuccessMillis?.let { formatEpochSeconds(it / 1000.0) } ?: "N/A"}")
-            Text("Handy-Netz: ${state.network.transport} ${state.network.ssid ?: ""} ${state.network.ipAddress ?: ""}".trim())
-            state.network.bssid?.let { Text("Access Point: $it") }
-            state.connection.lastError?.let { Text("REST-Fehler: $it", color = MaterialTheme.colorScheme.error) }
-            state.connection.webSocketError?.let { Text("WebSocket-Fehler: $it", color = MaterialTheme.colorScheme.error) }
+    val connected = state.connection.restConnected && !state.connection.stale
+    val color = if (connected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.errorContainer
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = color)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                if (connected) "System verbunden" else "Verbindung überprüfen",
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                if (connected) "Die Werte werden vom Raspberry Pi geladen."
+                else "Prüfe das WLAN, die Server-IP und den Zugriff in Einstellungen.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (!connected) {
+                state.connection.lastError?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun HistoryScreen(status: ServerStatus?) {
-    val values = listOfNotNull(
-        status?.counts?.inside?.toFloat(),
-        status?.counts?.entered?.toFloat(),
-        status?.counts?.exited?.toFloat(),
-        status?.counts?.visible?.toFloat(),
-    )
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { SectionTitle("Verlauf") }
         item {
-            Text("Die vorhandene Server-API liefert aktuell Momentaufnahmen, aber noch keine echten Historienreihen. Die App zeigt leere Reihen stabil an und nutzt echte Werte, sobald der Server Historie liefert.")
+            EmptyCard(
+                "Der Server liefert derzeit keine echte Zeitreihe. Hier werden deshalb " +
+                "keine künstlichen Verlaufskurven aus verschiedenen Momentanwerten dargestellt."
+            )
         }
-        item { ChartCard("Personenbestand / Eintritte / Austritte", values) }
-        item { ChartCard("CPU-Auslastung", listOfNotNull(status?.host?.cpuPercent?.toFloat()), "%") }
-        item { ChartCard("CPU-Temperatur", listOfNotNull(status?.host?.temperatureC?.toFloat()), "C") }
-        item { ChartCard("RAM-Auslastung", listOfNotNull(status?.host?.ramPercent?.toFloat()), "%") }
+        item {
+            MetricGrid(
+                listOf(
+                    "Aktuell anwesend" to formatInt(status?.counts?.inside),
+                    "Eintritte gesamt" to formatInt(status?.counts?.entered),
+                    "Austritte gesamt" to formatInt(status?.counts?.exited),
+                    "Besucher heute" to formatInt(status?.counts?.dailyUnique),
+                )
+            )
+        }
     }
 }
 
@@ -615,10 +655,15 @@ private fun MetricGrid(items: List<Pair<String, String>>) {
 
 @Composable
 private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(12.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Text(value, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+            Text(value, fontWeight = FontWeight.SemiBold, fontSize = 23.sp)
         }
     }
 }
@@ -663,8 +708,8 @@ private fun SimpleLineChart(values: List<Float>) {
 
 @Composable
 private fun EventRow(event: EventItem) {
-    Card(shape = RoundedCornerShape(8.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Card(shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(event.eventType ?: "Ereignis", fontWeight = FontWeight.Bold)
             Text("${formatEpochSeconds(event.time)} | Kamera: ${event.cameraId ?: "N/A"} | Richtung: ${event.direction ?: "N/A"}")
             Text("Konfidenz: ${formatDouble(event.confidence)} | counted=${event.counted ?: "N/A"} | uncertain=${event.uncertain ?: "N/A"}")
