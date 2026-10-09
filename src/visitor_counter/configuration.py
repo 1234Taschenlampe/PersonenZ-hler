@@ -325,16 +325,10 @@ def validate_config(config: AppConfig) -> list[str]:
 
 
 def privacy_readiness_errors(config: AppConfig) -> list[str]:
-    """Return operator actions required before camera processing may start."""
+    """Check technical privacy defaults without demanding personal form entries."""
     errors = validate_config(config)
     if not config.privacy.enabled:
         errors.append("Privacy mode must be enabled for production camera processing.")
-    if not config.privacy.privacy_notice_acknowledged:
-        errors.append("Confirm that the required privacy notice is visibly installed.")
-    if not config.privacy.privacy_notice_acknowledged_at.strip():
-        errors.append("Record when the privacy notice was acknowledged.")
-    if not config.privacy.legal_basis.strip():
-        errors.append("Document the assessed legal basis before enabling cameras.")
-    if not config.privacy.controller_name.strip() or not config.privacy.controller_contact.strip():
-        errors.append("Document the controller name and privacy contact.")
+    # Documentation fields are optional within the configuration UI. This does
+    # not certify or replace the operator's legal duties at the place of use.
     return errors
