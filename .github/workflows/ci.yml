@@ -94,9 +94,17 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # Ubuntu runners ship Android command-line tools. setup-android@v3
+      # currently calls the removed "sdkmanager tools" package and fails.
       - name: Install Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit)"
+          test -n "$sdkmanager" || { echo "sdkmanager not available on runner" >&2; exit 1; }
+          "$sdkmanager" --sdk_root="$sdk_root" "platforms;android-36" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"

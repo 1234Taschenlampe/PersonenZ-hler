@@ -42,7 +42,7 @@ class FirstRunWizard(QWizard):
         welcome = QWizardPage()
         welcome.setTitle("Willkommen bei PersonenZähler")
         welcome.setSubTitle(
-            "Dieser Assistent prüft System, Hailo, Kameras, Datenschutz, Sicherheit und Lizenz."
+            "In wenigen Schritten: System, Kameras, KI-Hardware und lokale Verbindung."
         )
         layout = QVBoxLayout(welcome)
         text = QLabel(
@@ -101,7 +101,7 @@ class FirstRunWizard(QWizard):
         camera_page = QWizardPage()
         camera_page.setTitle("Kameras")
         camera_page.setSubTitle(
-            "Nur echte Videoquellen auswählen; Metadata-Nodes werden von der Erkennung verworfen."
+            "USB-Quellen werden erkannt. Reolink-IP-Kameras später unter Kameras im LAN suchen oder manuell eintragen."
         )
         camera_layout = QFormLayout(camera_page)
         discovered = discover_camera_devices()
@@ -147,7 +147,7 @@ class FirstRunWizard(QWizard):
         privacy_page = QWizardPage()
         privacy_page.setTitle("Datenschutz")
         privacy_page.setSubTitle(
-            "Betreiberangaben und Zweck werden technisch dokumentiert, nicht rechtlich bewertet."
+            "Angaben sind optional und können später im Bereich Datenschutz ergänzt werden."
         )
         privacy_layout = QFormLayout(privacy_page)
         self.controller = QLineEdit(self.config.privacy.controller_name)
@@ -156,11 +156,7 @@ class FirstRunWizard(QWizard):
         self.legal_basis = QLineEdit(self.config.privacy.legal_basis)
         self.notice = QCheckBox("Datenschutzhinweis ist sichtbar angebracht")
         self.notice.setChecked(self.config.privacy.privacy_notice_acknowledged)
-        privacy_page.registerField("controller*", self.controller)
-        privacy_page.registerField("contact*", self.contact)
-        privacy_page.registerField("purpose*", self.purpose)
-        privacy_page.registerField("legal_basis*", self.legal_basis)
-        privacy_page.registerField("notice*", self.notice)
+        # Keine Pflichtfelder: Die Dokumentation kann später ergänzt werden.
         privacy_layout.addRow("Verantwortlicher", self.controller)
         privacy_layout.addRow("Kontakt", self.contact)
         privacy_layout.addRow("Zweck", self.purpose)
@@ -246,8 +242,9 @@ class FirstRunWizard(QWizard):
                 self, "Konfiguration konnte nicht gespeichert werden", str(exc)
             )
             return
-        if not self._issues():
-            self.service.mark_first_run_complete()
+        # Setup ist gespeichert, auch wenn Kamera/HEF noch fehlen; offene
+        # Hardwarepunkte bleiben in der Diagnose sichtbar.
+        self.service.mark_first_run_complete()
         super().accept()
 
     def _issues(self) -> list[str]:
