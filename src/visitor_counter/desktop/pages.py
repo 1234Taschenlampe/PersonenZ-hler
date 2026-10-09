@@ -227,6 +227,8 @@ class CamerasPage(BasePage):
             exit_direction = QComboBox()
             exit_direction.addItem("B → A bedeutet hinaus", "B_to_A")
             exit_direction.addItem("A → B bedeutet hinaus", "A_to_B")
+            exit_direction.setEnabled(False)
+            exit_direction.setToolTip("Die Austrittsrichtung ist immer die Gegenrichtung.")
             entry_direction.currentIndexChanged.connect(
                 lambda _index, x=entry_direction, y=exit_direction:
                     y.setCurrentIndex(max(0, y.findData(
@@ -377,12 +379,25 @@ class CamerasPage(BasePage):
 
     def _apply_reolink(self, camera_id: str) -> None:
         from PySide6.QtWidgets import QMessageBox
+        from urllib.parse import unquote, urlsplit
+
         controls = self.cards[camera_id]
+        combo: QComboBox = controls["source"]  # type: ignore[assignment]
+        ip = controls["ip_address"].text().strip()  # type: ignore[attr-defined]
+        username = controls["camera_user"].text().strip()  # type: ignore[attr-defined]
+        password = controls["camera_password"].text()  # type: ignore[attr-defined]
+        # Changing only sub/main quality must not remove existing credentials.
+        # We never insert recovered passwords into any visible text field.
+        existing = urlsplit(self._source(combo))
+        if existing.hostname == ip and existing.username and existing.password:
+            old_username = unquote(existing.username)
+            if not username:
+                username = old_username
+            if not password and username == old_username:
+                password = unquote(existing.password)
         try:
             url = reolink_rtsp_url(
-                controls["ip_address"].text().strip(),  # type: ignore[attr-defined]
-                controls["camera_user"].text().strip(),  # type: ignore[attr-defined]
-                controls["camera_password"].text(),  # type: ignore[attr-defined]
+                ip, username, password,
                 port=controls["rtsp_port"].value(),  # type: ignore[attr-defined]
                 stream=str(controls["stream"].currentData()),  # type: ignore[attr-defined]
             )
