@@ -26,7 +26,10 @@ class CameraConfig:
     exit_zone: str = "far"
     masks: list[list[tuple[int, int]]] = field(default_factory=list)
     entry_direction: str = "A_to_B"  # "A_to_B", "B_to_A", or "none"
-    exit_direction: str = "B_to_A"   # "A_to_B", "B_to_A", or "none"
+    exit_direction: str = "B_to_A"   # opposite of entry_direction
+    counting_mode: str = "line"  # line: immediate stable crossing; exit_edge: after disappearance near frame edge
+    disappearance_frames: int = 6
+    edge_margin_pixels: int = 90
 
 
 @dataclass
@@ -176,6 +179,8 @@ class AppConfig:
                 camera_id="camera_2",
                 role="exit",
                 display_name="AUSGANG - Kamera 2",
+                entry_direction="A_to_B",
+                exit_direction="B_to_A",
             ),
         }
     )
@@ -200,6 +205,14 @@ def _camera_from_dict(camera_id: str, data: dict[str, Any]) -> CameraConfig:
     for key in ("line_start", "line_end"):
         if key in item and isinstance(item[key], list):
             item[key] = tuple(item[key])
+    # Legacy "exit-only" presets prevented inward movement at that door.
+    # Interpret the existing permitted direction, preserve its geometry and
+    # activate the exact reverse mapping; do not change normal bidirectional
+    # customized configurations.
+    if item.get("entry_direction") == "none" and item.get("exit_direction") in {"A_to_B", "B_to_A"}:
+        item["entry_direction"] = "B_to_A" if item["exit_direction"] == "A_to_B" else "A_to_B"
+    elif item.get("exit_direction") == "none" and item.get("entry_direction") in {"A_to_B", "B_to_A"}:
+        item["exit_direction"] = "B_to_A" if item["entry_direction"] == "A_to_B" else "A_to_B"
     return CameraConfig(**item)
 
 
@@ -262,6 +275,18 @@ def validate_config(config: AppConfig) -> list[str]:
     roles = {camera.role for camera in config.cameras.values()}
     if roles != {"entrance", "exit"}:
         errors.append("Camera roles must contain exactly one entrance and one exit camera.")
+    for camera in config.cameras.values():
+        if camera.entry_direction not in {"A_to_B", "B_to_A"}:
+            errors.append(f"{camera.camera_id}: Die Eintrittsrichtung muss A_to_B oder B_to_A sein.")
+        opposite = "B_to_A" if camera.entry_direction == "A_to_B" else "A_to_B"
+        if camera.exit_direction != opposite:
+            errors.append(f"{camera.camera_id}: Austritt muss die Gegenrichtung zum Eintritt sein.")
+        if camera.counting_mode not in {"line", "exit_edge"}:
+            errors.append(f"{camera.camera_id}: Ungültiger Zählmodus.")
+        if not 3 <= camera.disappearance_frames <= 120:
+            errors.append(f"{camera.camera_id}: Ungültige Wartezeit bis Bildrandbestätigung.")
+        if not 10 <= camera.edge_margin_pixels <= 300:
+            errors.append(f"{camera.camera_id}: Ungültiger Bildrandabstand.")
     forbidden_paths = {"models/yolo26m_pose_hailo10h_640.hef", "models/yolov8s_pose_h10.hef", "models/yolov8s_pose_h8.hef"}
     if config.model.hef_path in forbidden_paths:
         errors.append("Pose HEFs must never be used as detection models.")
