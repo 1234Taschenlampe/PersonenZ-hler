@@ -31,6 +31,7 @@ from ..diagnostics import (
 )
 from ..license_guard import LicenseError
 from ..model_installation import ModelInstallationService
+from ..network_camera_discovery import scan_rtsp_network
 from ..runtime_paths import RuntimePaths
 from ..security_assets import SecurityAssetService
 from ..settings_service import SettingsError, SettingsService
@@ -158,6 +159,7 @@ class MainWindow(QMainWindow):
     def _connect_pages(self) -> None:
         cameras: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
         cameras.discover_requested.connect(self._discover_cameras)
+        cameras.network_scan_requested.connect(self._scan_network_cameras)
         cameras.save_requested.connect(self._save_cameras)
         cameras.test_requested.connect(self._test_camera)
         hardware: HardwarePage = self.pages["KI & Hardware"]  # type: ignore[assignment]
@@ -271,6 +273,14 @@ class MainWindow(QMainWindow):
         page.discovery_status.setText("Suche läuft …")
         self._run_worker(discover, page.set_discovered)
 
+    def _scan_network_cameras(self, subnet: str) -> None:
+        page: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
+        page.discovery_status.setText("RTSP-Geräte werden im lokalen Netz gesucht …")
+        self._run_worker(
+            lambda: [item.url_template for item in scan_rtsp_network(subnet)],
+            page.set_discovered_network,
+        )
+
     def _test_camera(self, source: str) -> None:
         if not source:
             QMessageBox.information(
@@ -279,7 +289,19 @@ class MainWindow(QMainWindow):
             return
 
         def probe() -> tuple[str, bool, str]:
-            capture = cv2.VideoCapture(int(source) if source.isdigit() else source)
+            if source.lower().startswith(("rtsp://", "rtsps://")):
+                capture = cv2.VideoCapture(
+                    source,
+                    cv2.CAP_FFMPEG,
+                    [
+                        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000,
+                        cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000,
+                    ],
+                )
+            else:
+                capture = cv2.VideoCapture(
+                    int(source) if source.isdigit() else source
+                )
             try:
                 if not capture.isOpened():
                     return source, False, "Nicht erreichbar"
