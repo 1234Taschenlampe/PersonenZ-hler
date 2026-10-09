@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import os
 from pathlib import Path
 import subprocess
 from threading import Condition, Event, Thread
@@ -215,6 +216,27 @@ def discover_camera_devices() -> list[CameraDeviceInfo]:
     return devices
 
 
+def open_camera_source(source: str, *, timeout_ms: int = 5000) -> cv2.VideoCapture:
+    """Use the same bounded RTSP-over-TCP configuration for test and runtime.
+
+    OpenCV FFmpeg honors OPENCV_FFMPEG_CAPTURE_OPTIONS at stream creation.
+    Respect operator overrides. Never log the credential-bearing URL.
+    """
+    if is_network_camera_source(source):
+        if source.lower().startswith(("rtsp://", "rtsps://")):
+            os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+        return cv2.VideoCapture(
+            source, cv2.CAP_FFMPEG,
+            [
+                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms,
+                cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000,
+            ],
+        )
+    if source.isdigit():
+        return cv2.VideoCapture(int(source), cv2.CAP_V4L2)
+    return cv2.VideoCapture(source, cv2.CAP_V4L2)
+
+
 class CameraCapture(Thread):
     """Capture worker supporting local V4L2 and WLAN/IP camera streams.
 
@@ -280,15 +302,7 @@ class CameraCapture(Thread):
         self.stats.state = "OFFLINE"
 
     def _open_capture(self, source: str) -> cv2.VideoCapture:
-        if is_network_camera_source(source):
-            return cv2.VideoCapture(
-                source, cv2.CAP_FFMPEG,
-                [
-                    cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
-                    cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000,
-                ],
-            )
-        return cv2.VideoCapture(source, cv2.CAP_V4L2)
+        return open_camera_source(source, timeout_ms=5000)
 
     def _configure_capture(self, capture: cv2.VideoCapture, source: str) -> None:
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
