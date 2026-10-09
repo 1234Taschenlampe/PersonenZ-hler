@@ -30,6 +30,7 @@ from ..configuration import AppConfig
 from ..license_service import LicenseStatus
 from ..network_camera_discovery import RtspCandidate, reolink_rtsp_url
 from .components import Card, HistoryChart, MetricCard, PageHeader, StatusBadge
+from .live_preview import CameraPreviewPanel
 
 
 class BasePage(QWidget):
@@ -89,6 +90,12 @@ class OverviewPage(BasePage):
         self.updated = QLabel("Noch nicht aktualisiert")
         self.updated.setProperty("muted", True)
         self.layout.addWidget(self.updated)
+        self.inference_info = QLabel("KI-Verarbeitung wird geprüft …")
+        self.inference_info.setProperty("muted", True)
+        self.inference_info.setWordWrap(True)
+        self.layout.addWidget(self.inference_info)
+        self.preview_panel = CameraPreviewPanel(self)
+        self.layout.addWidget(self.preview_panel)
         self.layout.addStretch()
 
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
@@ -110,8 +117,26 @@ class OverviewPage(BasePage):
             "ok" if snapshot.cameras and online == len(snapshot.cameras) else "warning"
         )
         self.health["Kameras"].set_state(
-            camera_state, f"{online}/{len(snapshot.cameras)} online"
+            "ok" if online else "warning",
+            f"{online} von {len(snapshot.cameras)} online",
         )
+        try:
+            inference_fps = float(snapshot.runtime.get("inference_fps") or 0)
+        except (ValueError, TypeError):
+            inference_fps = 0.0
+        if online and inference_fps <= 0:
+            self.inference_info.setText(
+                "Kamera überträgt Bilder, aber die KI verarbeitet derzeit keine Frames. "
+                "Zähldienst, Hailo und YOLO26m prüfen."
+            )
+        elif inference_fps > 0:
+            self.inference_info.setText(
+                f"KI verarbeitet {inference_fps:.1f} Bilder/s. "
+                "Eintritte und Austritte werden erst nach einem gültigen "
+                "Überqueren der konfigurierten Zähllinie gezählt."
+            )
+        else:
+            self.inference_info.setText("Keine laufende KI-Verarbeitung.")
         self.health["Datenbank"].set_state(
             "ok" if snapshot.database.get("exists") else "warning",
             "Bereit" if snapshot.database.get("exists") else "Noch leer",
