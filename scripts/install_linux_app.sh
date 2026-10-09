@@ -82,8 +82,23 @@ for pkg in "${packages[@]}"; do
   installed_pkg "$pkg" || missing+=("$pkg")
 done
 h10_needed=0
-if [[ "$pi5" -eq 1 ]] && ! installed_pkg hailo-h10-all; then
-  h10_needed=1
+driver_conflict=0
+if [[ "$pi5" -eq 1 ]]; then
+  if installed_pkg hailo-all; then
+    driver_conflict=1
+    warn "Hailo-8-Paket 'hailo-all' gefunden; es ist mit Hailo-10H unvereinbar."
+    warn "Nichts wird automatisch deinstalliert. Prüfe vor einer manuellen Treiberbereinigung das Gerät."
+  elif installed_pkg hailo-h10-all || installed_pkg h10-hailort; then
+    log "Bereits installierten Hailo-10H-Stack beibehalten."
+  elif command -v hailortcli >/dev/null 2>&1 &&
+       hailortcli --version 2>&1 | grep -Eq '5[.][0-9]'; then
+    log "Manuell installierten HailoRT-5.x-Stack beibehalten; keine apt-Downgrade-Versuche."
+  else
+    h10_needed=1
+  fi
+fi
+if [[ "$h10_needed" -eq 1 ]] && ! installed_pkg dkms; then
+  missing+=("dkms")
 fi
 log "2/7 Systempakete: ${#missing[@]} fehlend; Hailo-10H-Treiber: $([[ "$h10_needed" -eq 1 ]] && echo 'prüfen' || echo 'keine Installation')"
 if [[ "${#missing[@]}" -gt 0 ]]; then
@@ -218,7 +233,7 @@ log "Desktop: Anwendungen → Personenzaehler"
 log "Konfiguration: $CONFIG_FILE"
 log "Secrets: $SECRETS_FILE (bereits bestehende Schlüssel wurden beibehalten)"
 log "Statusdienste: systemctl --user status personenzaehler.service personenzaehler-mobile-api.service"
-if [[ "$models_ok" -eq 0 ]]; then
+if [[ "$models_ok" -eq 0 || "$driver_conflict" -eq 1 ]]; then
   warn "Einrichtung nur teilweise abgeschlossen (Modelle prüfen). Dieselbe Installation darf erneut laufen."
   exit 2
 fi
