@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import ipaddress
 import json
-import re
 import socket
 import subprocess
 from urllib.parse import quote
