@@ -74,13 +74,11 @@ chmod 600 "$SECRETS_FILE"
 
 DETECTOR_MODEL="models/yolo26m_detection_hailo10h_640.hef"
 REID_MODEL="models/osnet_x1_0_hailo10h.hef"
-if [[ ! -s "$DETECTOR_MODEL" ]]; then
-  log "Detektionsmodell fehlt: $DETECTOR_MODEL"
-  log "Lege das fuer Hailo-10H kompilierte YOLO26m-HEF dort ab; die App verweigert sonst produktive Detektion."
-fi
-if [[ ! -s "$REID_MODEL" ]]; then
-  log "Re-ID-Modell fehlt: $REID_MODEL"
-  log "Fuer den eindeutigen Tageszaehler wird das OSNet-Hailo-10H-HEF benoetigt."
+log "Lade offiziell kompilierte Hailo-10H-Modelle herunter (nur von Hailo, mit SHA-256-Prüfung) ..."
+if ! python scripts/download_models.py --kind all; then
+  log "WARNUNG: Mindestens ein Modell fehlt oder konnte nicht verifiziert werden."
+  log "Im Menü KI & Hardware können die Originalmodelle später nachgeladen werden."
+  log "Prüfe HailoRT-/Firmwareversion sowie Netzwerkverbindung."
 fi
 
 log "Installiere Desktop-Starter und Autostart ..."
