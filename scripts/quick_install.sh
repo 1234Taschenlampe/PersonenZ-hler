@@ -26,8 +26,12 @@ fail() { echo "[PersonenZähler] FEHLER: $*" >&2; exit 1; }
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   say "Trockentest: kein Git-Download und keine Systemänderung."
-  if [[ -f "$TARGET/scripts/install_linux_app.sh" ]]; then
+  if [[ -f "$TARGET/scripts/install_linux_app.sh" ]] &&
+     grep -Fq "DRY_RUN=0" "$TARGET/scripts/install_linux_app.sh"; then
     bash "$TARGET/scripts/install_linux_app.sh" "${ARGS[@]}"
+  elif [[ -f "$TARGET/scripts/install_linux_app.sh" ]]; then
+    say "Lokaler Installer ist zu alt für einen schreibfreien Test. Keine Ausführung."
+    exit 1
   else
     say "Ein Erststart würde das Repository unter $TARGET klonen."
   fi
