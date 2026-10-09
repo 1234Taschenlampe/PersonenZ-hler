@@ -106,6 +106,7 @@ def data_entries() -> list[PackageEntry]:
         "SECURITY_REVIEW.md",
         "PRIVACY_AND_SECURITY.md",
         "LICENSE_SYSTEM.md",
+        "MODEL_SOURCES_AND_CREDITS.md",
     ):
         source = ROOT / "docs" / name
         if source.is_file():
