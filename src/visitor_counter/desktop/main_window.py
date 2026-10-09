@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self._workers: set[FunctionWorker] = set()
         self._refreshing = False
+        self._preview_sources: dict[str, str] = {}
         self._dark = QSettings("PersonenZaehler", "Desktop").value(
             "darkMode", False, bool
         )
@@ -182,6 +183,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(index)
         for button_index, button in enumerate(self.nav_buttons):
             button.setChecked(button_index == index)
+        overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
+        overview.preview_panel.set_active(index == 0)
 
     def refresh(self) -> None:
         if self._refreshing:
@@ -200,6 +203,7 @@ class MainWindow(QMainWindow):
         system: SystemPage = self.pages["System"]  # type: ignore[assignment]
         privacy: PrivacyPage = self.pages["Datenschutz"]  # type: ignore[assignment]
         overview.update_snapshot(snapshot)
+        overview.preview_panel.update_cameras(snapshot.cameras, self._preview_sources)
         cameras.update_snapshot(snapshot)
         system.update_snapshot(snapshot)
         if snapshot.license:
@@ -229,6 +233,11 @@ class MainWindow(QMainWindow):
         except SettingsError as exc:
             QMessageBox.critical(self, "Konfigurationsfehler", str(exc))
             return
+        self._preview_sources = {
+            camera_id: camera.device
+            for camera_id, camera in config.cameras.items()
+            if camera.device
+        }
         self.pages["Kameras"].set_config(config)  # type: ignore[attr-defined]
         self.pages["Datenschutz"].set_config(config)  # type: ignore[attr-defined]
         self.pages["Einstellungen"].set_config(config)  # type: ignore[attr-defined]
@@ -265,6 +274,11 @@ class MainWindow(QMainWindow):
                         setattr(camera, field, value)
             if changed:
                 self.settings_service.save(config)
+                self._preview_sources = {
+                    camera_id: camera.device
+                    for camera_id, camera in config.cameras.items()
+                    if camera.device
+                }
         except SettingsError as exc:
             QMessageBox.warning(self, "Kameras nicht gespeichert", str(exc))
             return
@@ -544,6 +558,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.timer.stop()
+        overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
+        overview.preview_panel.shutdown()
         self.thread_pool.waitForDone(5000)
         event.accept()
 
