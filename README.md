@@ -4,6 +4,24 @@ PersonenZähler ist eine native Linux-Desktop-Anwendung für lokale, Hailo-besch
 
 ![Übersicht der nativen Desktop-Anwendung](docs/screenshots/overview.png)
 
+## Schnellinstallation für Raspberry Pi OS
+
+Die Installation aus dem Quellcode inklusive Menüeintrag, lokaler virtueller
+Umgebung, Diagnose und Hailo-10H-Treiberprüfung ist mit zwei Terminalzeilen möglich:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1234Taschenlampe/PersonenZ-hler/main/scripts/quick_install.sh -o /tmp/personenzaehler-install.sh
+bash /tmp/personenzaehler-install.sh
+```
+
+Anschließend das Programm über das Raspberry-Pi-Anwendungsmenü öffnen, unter
+**Kameras** private LAN-Kameras suchen oder Reolink-IP und Zugangsdaten manuell
+eintragen. Nach erfolgreichem Kameratest die passenden Hailo-10H-HEFs importieren.
+Für den Präsentationstest gilt die [Raspberry-Pi-Abnahmecheckliste](docs/PRESENTATION_SETUP.md).
+**Wichtig:** Die projektspezifischen YOLO26m- und OSNet-HEFs sind nicht Teil
+dieses Git-Repositories; Installation allein bedeutet noch keine einsatzfähige Erkennung.
+Ein Neuaufsetzen des Pi ist normalerweise nicht erforderlich.
+
 ## Installation für Anwender
 
 1. Das ARM64-Paket `personenzaehler_1.0.0_arm64.deb` aus dem GitHub-Actions-Artefakt laden.
