@@ -43,6 +43,7 @@ def test_preview_filters_stale_or_unconfigured_cameras_and_supports_more_than_tw
 def test_overview_does_not_require_every_camera_to_be_online() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication([])
+    assert app is not None
     page = OverviewPage()
     page.update_snapshot(DashboardSnapshot(
         timestamp=0,
