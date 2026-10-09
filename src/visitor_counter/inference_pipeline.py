@@ -208,7 +208,9 @@ class ProcessingPipeline(Thread):
             events = (
                 []
                 if obstruction.obstructed
-                else self.counters[packet.camera_id].update(packet.frame_id, tracks)
+                else self.counters[packet.camera_id].update(
+                    packet.frame_id, tracks, frame_size=(packet.width, packet.height)
+                )
             )
             for event in events:
                 decision = self.consensus.decide(event)
