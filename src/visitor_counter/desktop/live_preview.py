@@ -79,12 +79,6 @@ class _PreviewReader(QThread):
                 height, width = frame.shape[:2]
                 if width <= 0 or height <= 0:
                     continue
-                target_width = min(width, 800)
-                target_height = max(1, round(height * target_width / width))
-                if target_width != width:
-                    frame = cv2.resize(
-                        frame, (target_width, target_height), interpolation=cv2.INTER_AREA
-                    )
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = QImage(
                     rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0],

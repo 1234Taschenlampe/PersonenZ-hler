@@ -164,16 +164,20 @@ class HailoManager:
         resize_start = perf_counter()
         resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         resize_end = perf_counter()
+        # OpenCV decodes BGR; the official YOLO26m HEF expects RGB input.
+        # Convert after the resize to minimize CPU work on the Pi.
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        color_end = perf_counter()
         letterbox_start = perf_counter()
         padded = np.full((model_h, model_w, 3), (114, 114, 114), dtype=np.uint8)
         x_offset = (model_w - new_w) // 2
         y_offset = (model_h - new_h) // 2
-        padded[y_offset : y_offset + new_h, x_offset : x_offset + new_w] = resized
+        padded[y_offset : y_offset + new_h, x_offset : x_offset + new_w] = rgb
         tensor = np.ascontiguousarray(padded[np.newaxis, ...])
         letterbox_end = perf_counter()
         return tensor, {
             "jpeg_decode_ms": 0.0,
-            "color_convert_ms": 0.0,
+            "color_convert_ms": (color_end - resize_end) * 1000.0,
             "resize_ms": (resize_end - resize_start) * 1000.0,
             "letterbox_ms": (letterbox_end - letterbox_start) * 1000.0,
         }

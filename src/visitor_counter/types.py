@@ -145,6 +145,8 @@ class ConsensusDecision:
 class CameraStats:
     connected: bool = False
     fps: float = 0.0
+    frame_width: int = 0
+    frame_height: int = 0
     dropped_frames: int = 0
     queue_replacements: int = 0
     last_error: str = ""
@@ -204,6 +206,11 @@ def summarize_latency(values: list[float]) -> LatencySummary:
 @dataclass
 class RuntimeStats:
     inference_fps: float = 0.0
+    camera_processed_frames: dict[str, int] = field(default_factory=dict)
+    camera_raw_person_detections: dict[str, int] = field(default_factory=dict)
+    camera_person_detections: dict[str, int] = field(default_factory=dict)
+    camera_confirmed_tracks: dict[str, int] = field(default_factory=dict)
+    camera_last_processed_time: dict[str, float] = field(default_factory=dict)
     inference_latency_ms: float = 0.0
     total_latency_ms: float = 0.0
     frame_age_ms: float = 0.0

@@ -101,11 +101,9 @@ class OverviewPage(BasePage):
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
             card.set_value(snapshot.counts.get(key, 0))
-        runtime_ready = str(snapshot.runtime.get("hailo_status", "")).lower() in {
-            "ready",
-            "ok",
-            "bereit",
-        }
+        runtime_ready = bool(snapshot.runtime.get("detector_active")) if (
+            "detector_active" in snapshot.runtime
+        ) else "Hailo-Inferenz aktiv" in str(snapshot.runtime.get("hailo_status", ""))
         self.health["KI-Beschleuniger"].set_state(
             "ok" if runtime_ready else "error",
             "Bereit" if runtime_ready else "Nicht bereit",
@@ -233,6 +231,7 @@ class CamerasPage(BasePage):
             stream = QComboBox()
             stream.addItem("Substream (schneller)", "sub")
             stream.addItem("Hauptstream (hohe Auflösung)", "main")
+            stream.setCurrentIndex(1)  # Prefer main stream with native resolution.
             apply_ip = QPushButton("Reolink-Quelle aus IP übernehmen")
             apply_ip.clicked.connect(
                 lambda _checked=False, cid=camera_id: self._apply_reolink(cid)
@@ -316,6 +315,11 @@ class CamerasPage(BasePage):
             if parsed.scheme.lower() in {"rtsp", "rtsps"} and parsed.hostname:
                 controls["ip_address"].setText(parsed.hostname)  # type: ignore[attr-defined]
                 controls["rtsp_port"].setValue(parsed.port or 554)  # type: ignore[attr-defined]
+                stream: QComboBox = controls["stream"]  # type: ignore[assignment]
+                if parsed.path.lower().endswith("_main"):
+                    stream.setCurrentIndex(stream.findData("main"))
+                elif parsed.path.lower().endswith("_sub"):
+                    stream.setCurrentIndex(stream.findData("sub"))
             role: QComboBox = controls["role"]  # type: ignore[assignment]
             role.setCurrentIndex(max(0, role.findData(camera.role)))
             entry: QComboBox = controls["entry_direction"]  # type: ignore[assignment]
@@ -461,6 +465,15 @@ class CamerasPage(BasePage):
                 detail = "Kein aktuelles Bild"
             if online and camera.get("actual_fps") is not None:
                 detail += f" · {camera['actual_fps']} FPS"
+            width = camera.get("actual_width") or 0
+            height = camera.get("actual_height") or 0
+            if online and width and height:
+                detail += f" · {width} × {height}"
+            if online and camera.get("ai_processed_frames") is not None:
+                detail += (
+                    f" · KI: {camera['ai_person_detections']} Personen, "
+                    f"{camera['ai_confirmed_tracks']} Tracks"
+                )
             if not online and camera.get("last_error"):
                 detail += " · " + str(camera["last_error"])[:95]
             badge: StatusBadge = self.cards[camera_id]["status"]  # type: ignore[assignment]

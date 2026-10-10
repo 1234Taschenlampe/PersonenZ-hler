@@ -341,6 +341,7 @@ class CameraCapture(Thread):
                 self._reconnect_delay_seconds = 1.0
             self._frame_id += 1
             captured_at = time()
+            self.stats.frame_height, self.stats.frame_width = image.shape[:2]
             self.stats.last_frame_time = captured_at
             packet = FramePacket.from_image(self.config.camera_id, self._frame_id, image, captured_at)
             if self.output.put(packet):

@@ -170,10 +170,12 @@ class ProcessingPipeline(Thread):
                 obstruction.obstructed
             )
             detect_start = monotonic()
-            detections = [] if obstruction.obstructed else self._detect(packet)
+            raw_detections = [] if obstruction.obstructed else self._detect(packet)
             detections = self._filter_person_detections(
-                detections, packet.width, packet.height
+                raw_detections, packet.width, packet.height
             )
+            self.runtime_stats.camera_raw_person_detections[packet.camera_id] = len(raw_detections)
+            self.runtime_stats.camera_person_detections[packet.camera_id] = len(detections)
             stage_ms["detect_total_ms"] = (monotonic() - detect_start) * 1000.0
             stage_ms.update(self.hailo.last_stage_ms)
             tracker_start = monotonic()
@@ -196,6 +198,13 @@ class ProcessingPipeline(Thread):
                 packet.height,
             )
             stage_ms["identity_ms"] = (monotonic() - identity_start) * 1000.0
+            self.runtime_stats.camera_confirmed_tracks[packet.camera_id] = sum(
+                track.confirmed and track.lost_frames == 0 for track in tracks
+            )
+            self.runtime_stats.camera_processed_frames[packet.camera_id] = (
+                self.runtime_stats.camera_processed_frames.get(packet.camera_id, 0) + 1
+            )
+            self.runtime_stats.camera_last_processed_time[packet.camera_id] = packet.captured_at
             visible_ids = {
                 track.global_person_id
                 for track in tracks
@@ -482,9 +491,13 @@ class ProcessingPipeline(Thread):
 
     def _detect(self, packet: FramePacket) -> list[Detection]:
         if not self.hailo.ready:
+            self.runtime_stats.detector_active = False
+            self.runtime_stats.detector_error = self.hailo.status
             return []
         try:
             detections = self.hailo.infer(packet.image)
+            self.runtime_stats.detector_active = True
+            self.runtime_stats.detector_error = ""
             detections = [
                 Detection(
                     bbox=detection.bbox,
@@ -502,7 +515,7 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.inference_latency_ms = self.hailo.last_latency_ms
             self.runtime_stats.hailo_inference_count = self.hailo.inference_count
             if detections:
-                self.runtime_stats.last_detection_at = monotonic()
+                self.runtime_stats.last_detection_at = packet.captured_at
 
             if detections:
                 LOGGER.debug(
@@ -511,6 +524,8 @@ class ProcessingPipeline(Thread):
             return detections
         except HailoUnavailableError as exc:
             self.runtime_stats.hailo_status = str(exc)
+            self.runtime_stats.detector_active = False
+            self.runtime_stats.detector_error = str(exc)
             LOGGER.error("Hailo inference failed: %s", exc)
             return []
 

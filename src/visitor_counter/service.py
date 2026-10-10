@@ -5,7 +5,8 @@ import logging
 import signal
 from pathlib import Path
 from threading import Event
-from time import sleep, time
+from time import monotonic, sleep, time
+from urllib.parse import urlsplit
 
 from .camera_manager import CameraCapture, LatestFrameHub, camera_source_kind
 from .configuration import load_config, privacy_readiness_errors
@@ -43,6 +44,7 @@ class VisitorCounterService:
             for camera in self.config.cameras.values()
         ]
         self.live_status_path = self.paths.live_status_file
+        self._last_status_write_at = 0.0
         self.pipeline = EnhancedProcessingPipeline(
             self.config,
             self.project_root,
@@ -104,11 +106,20 @@ class VisitorCounterService:
         self.stop_event.set()
 
     def _on_stats(self, stats: RuntimeStats, counts: GlobalCounts) -> None:
+        # Avoid rewriting the live-status file on every captured frame.
+        tick = monotonic()
+        if tick - self._last_status_write_at < 1.0:
+            return
+        self._last_status_write_at = tick
         now = time()
         cameras = []
         for capture in self.captures:
             camera = capture.config
             cs = capture.stats
+            camera_path = urlsplit(camera.device or "").path.lower()
+            profile = "main" if camera_path.endswith("_main") else (
+                "sub" if camera_path.endswith("_sub") else "unknown"
+            )
             cameras.append(
                 {
                     "camera_id": camera.camera_id,
@@ -116,8 +127,13 @@ class VisitorCounterService:
                     "role": camera.role,
                     "source": camera_source_kind(camera.device),
                     "wanted_fps": camera.fps,
-                    "width": camera.width,
-                    "height": camera.height,
+                    "width": cs.frame_width or camera.width,
+                    "height": cs.frame_height or camera.height,
+                    "actual_width": cs.frame_width,
+                    "actual_height": cs.frame_height,
+                    "configured_width": camera.width,
+                    "configured_height": camera.height,
+                    "stream_profile": profile,
                     "status": cs.state,
                     "actual_fps": round(cs.fps, 1),
                     "last_frame_time": cs.last_frame_time,
@@ -131,6 +147,15 @@ class VisitorCounterService:
                     "dropped_frames": cs.dropped_frames,
                     "decode_errors": cs.decode_errors,
                     "last_error": redact_sensitive(cs.last_error),
+                    "ai_processed_frames": stats.camera_processed_frames.get(camera.camera_id, 0),
+                    "ai_raw_person_detections": stats.camera_raw_person_detections.get(camera.camera_id, 0),
+                    "ai_person_detections": stats.camera_person_detections.get(camera.camera_id, 0),
+                    "ai_confirmed_tracks": stats.camera_confirmed_tracks.get(camera.camera_id, 0),
+                    "seconds_since_last_ai_frame": (
+                        round(now - stats.camera_last_processed_time[camera.camera_id], 2)
+                        if camera.camera_id in stats.camera_last_processed_time
+                        else None
+                    ),
                     "visible": self.pipeline.counters[camera.camera_id].counts.visible,
                     "entered": self.pipeline.counters[camera.camera_id].counts.entered,
                     "exited": self.pipeline.counters[camera.camera_id].counts.exited,
@@ -159,6 +184,8 @@ class VisitorCounterService:
                 "total_latency_ms": round(stats.total_latency_ms, 1),
                 "frame_age_ms": round(stats.frame_age_ms, 1),
                 "hailo_status": stats.hailo_status,
+                "detector_active": stats.detector_active,
+                "detector_error": redact_sensitive(stats.detector_error),
                 "hailo_device": stats.hailo_device,
                 "hailo_inference_count": stats.hailo_inference_count,
                 "active_hef": stats.active_hef,
