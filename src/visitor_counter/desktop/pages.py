@@ -121,7 +121,12 @@ class OverviewPage(BasePage):
             inference_fps = float(snapshot.runtime.get("inference_fps") or 0)
         except (ValueError, TypeError):
             inference_fps = 0.0
-        if online and inference_fps <= 0:
+        if snapshot.runtime.get("detector_enabled") is False:
+            self.inference_info.setText(
+                "YOLO26m ist ausgeschaltet. Kameras dürfen weiter laufen; "
+                "Personenerkennung und Zähler sind pausiert."
+            )
+        elif online and inference_fps <= 0:
             self.inference_info.setText(
                 "Kamera überträgt Bilder, aber die KI verarbeitet derzeit keine Frames. "
                 "Zähldienst, Hailo und YOLO26m prüfen."
