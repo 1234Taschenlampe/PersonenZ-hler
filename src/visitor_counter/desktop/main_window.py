@@ -157,6 +157,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def _connect_pages(self) -> None:
+        overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
+        overview.preview_opt_in_changed.connect(
+            lambda enabled: self._save_values({
+                "display.show_camera_preview": bool(enabled),
+                "display.anonymization_mode": "full_frame",
+            })
+        )
         cameras: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
         cameras.discover_requested.connect(self._discover_cameras)
         cameras.network_scan_requested.connect(self._scan_network_cameras)
@@ -239,6 +246,7 @@ class MainWindow(QMainWindow):
             if camera.device
         }
         overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
+        overview.set_config(config)
         overview.preview_panel.set_preview_policy(
             enabled=config.display.show_camera_preview,
             pixel_size=config.display.pixel_size,
