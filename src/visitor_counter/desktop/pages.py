@@ -103,7 +103,9 @@ class OverviewPage(BasePage):
             "Aktiviert die lokale Vorschau. Bilder werden vor der Anzeige "
             "vollständig verpixelt; es werden keine Bilder gespeichert."
         )
-        self.preview_toggle.clicked.connect(self.preview_opt_in_changed.emit)
+        self.preview_toggle.clicked.connect(
+            lambda checked=False: self.preview_opt_in_changed.emit(bool(checked))
+        )
         self.layout.addWidget(self.preview_toggle)
         self.preview_panel = CameraPreviewPanel(self)
         self.layout.addWidget(self.preview_panel)
