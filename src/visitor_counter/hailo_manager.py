@@ -546,7 +546,17 @@ def detect_hailo_device() -> str:
     return "unknown"
 
 
-def map_hef_outputs_to_onnx_inputs(outputs: dict[str, np.ndarray], tensor_mapping: dict) -> dict[str, np.ndarray]:
+def map_hef_outputs_to_onnx_inputs(
+    outputs: dict[str, np.ndarray], tensor_mapping: dict, *, source_layout: str = "NHWC"
+) -> dict[str, np.ndarray]:
+    """Map native Hailo NHWC tensors to ONNX NCHW, without guessing axes.
+
+    YOLO26m's 80x80 classification head also has 80 channels. Its NHWC and
+    NCHW shapes are identical, so shape-based detection silently scrambles
+    the person scores. Reference ONNX tensors can explicitly request NCHW.
+    """
+    if source_layout not in {"NHWC", "NCHW"}:
+        raise HailoUnavailableError(f"Unsupported HEF output layout: {source_layout}")
     onnx_inputs: dict[str, np.ndarray] = {}
     for hef_name, (onnx_name, expected_shape) in tensor_mapping.items():
         if hef_name not in outputs:
@@ -557,15 +567,15 @@ def map_hef_outputs_to_onnx_inputs(outputs: dict[str, np.ndarray], tensor_mappin
         actual = list(tensor.shape)
         if len(actual) != 4:
             raise HailoUnavailableError(f"Unexpected HEF output shape for '{hef_name}': {tensor.shape}")
-        if actual[1:] == expected_shape:
-            mapped = tensor
-        elif [actual[3], actual[1], actual[2]] == expected_shape:
-            mapped = np.transpose(tensor, (0, 3, 1, 2))
-        else:
+        mapped_shape = [actual[3], actual[1], actual[2]] if source_layout == "NHWC" else actual[1:]
+        if mapped_shape != list(expected_shape):
             raise HailoUnavailableError(
-                f"Shape mismatch for '{hef_name}': expected {expected_shape}, got {actual[1:]} full={tensor.shape}"
+                f"Shape mismatch for '{hef_name}': expected {expected_shape}, got {mapped_shape} layout={source_layout} full={tensor.shape}"
             )
+        if tensor.dtype in (np.uint8, np.uint16):
+            raise HailoUnavailableError(f"Quantized HEF output '{hef_name}' requires FLOAT32 dequantization before ONNX postprocessing")
+        mapped = np.transpose(tensor, (0, 3, 1, 2)) if source_layout == "NHWC" else tensor
         if mapped.dtype != np.float32:
             mapped = mapped.astype(np.float32, copy=False)
-        onnx_inputs[onnx_name] = mapped
+        onnx_inputs[onnx_name] = np.ascontiguousarray(mapped)
     return onnx_inputs

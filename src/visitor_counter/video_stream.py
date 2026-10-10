@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 from threading import Condition, Event, Thread
@@ -31,9 +32,11 @@ class FrameStreamExporter:
         max_height: int = 360,
         jpeg_quality: int = 65,
         target_fps: float = 5.0,
+        _output_dir: Path | None = None,
+        _allow_raw: bool = False,
     ) -> None:
         self.enabled = enabled
-        self.output_dir = stream_frame_directory(project_root)
+        self.output_dir = _output_dir or stream_frame_directory(project_root)
         self.anonymization_mode = anonymization_mode
         self.pixel_size = pixel_size
         self.remove_on_shutdown = remove_on_shutdown
@@ -50,7 +53,7 @@ class FrameStreamExporter:
         if not enabled:
             self._remove_output_dir()
             return
-        if anonymization_mode == "none":
+        if anonymization_mode == "none" and not _allow_raw:
             raise ValueError("A video stream may not be enabled without anonymization.")
         if self.output_dir.is_symlink():
             raise RuntimeError(f"Refusing a symlinked stream directory: {self.output_dir}")
@@ -94,6 +97,7 @@ class FrameStreamExporter:
                     LOGGER.warning("STREAM_EXPORT_FAILED camera=%s error_type=%s", camera_id, type(exc).__name__)
 
     def _write_frame(self, camera_id: str, frame: np.ndarray, tracks: Iterable[object]) -> None:
+        native_height, native_width = frame.shape[:2]
         frame = anonymize_frame(
             frame,
             mode=self.anonymization_mode,
@@ -121,7 +125,9 @@ class FrameStreamExporter:
                     "width": width,
                     "height": height,
                     "bytes": len(data),
-                    "anonymized": True,
+                    "anonymized": self.anonymization_mode != "none",
+                    "native_width": native_width,
+                    "native_height": native_height,
                 },
                 sort_keys=True,
             ),
@@ -134,6 +140,8 @@ class FrameStreamExporter:
 
     def _resize(self, frame: np.ndarray) -> np.ndarray:
         height, width = frame.shape[:2]
+        if self.max_width <= 0 or self.max_height <= 0:
+            return frame
         scale = min(self.max_width / max(width, 1), self.max_height / max(height, 1), 1.0)
         if scale >= 1.0:
             return frame
@@ -156,3 +164,35 @@ def _set_mode(path: Path, mode: int) -> None:
         path.chmod(mode)
     except OSError:
         pass
+
+
+def local_preview_directory(project_root: Path) -> Path:
+    """Separate desktop IPC from the explicitly enabled remote video API."""
+    ram = Path("/dev/shm")
+    if ram.is_dir():
+        user_id = os.getuid() if hasattr(os, "getuid") else "local"
+        return ram / f"visitor-counter-preview-{user_id}"
+    return project_root / "data" / "runtime_preview_frames"
+
+
+class LocalPreviewExporter(FrameStreamExporter):
+    """Share native frames from the existing capture, never open another RTSP feed.
+
+    Raw local preview is restricted to Linux RAM storage. The remote stream's
+    anonymization requirement and opt-in remain independent of this channel.
+    """
+
+    def __init__(
+        self, project_root: Path, *, enabled: bool = False,
+        anonymization_mode: str = "full_frame", pixel_size: int = 24,
+        target_fps: float = 5.0,
+    ) -> None:
+        output_dir = local_preview_directory(project_root)
+        if enabled and anonymization_mode == "none" and output_dir.parent != Path("/dev/shm"):
+            raise ValueError("Raw desktop preview requires RAM-backed /dev/shm storage.")
+        super().__init__(
+            project_root, enabled=enabled, anonymization_mode=anonymization_mode,
+            pixel_size=pixel_size, max_width=0, max_height=0,
+            jpeg_quality=90, target_fps=target_fps, remove_on_shutdown=True,
+            _output_dir=output_dir, _allow_raw=True,
+        )

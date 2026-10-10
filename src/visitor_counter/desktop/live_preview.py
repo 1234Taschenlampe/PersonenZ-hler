@@ -1,39 +1,25 @@
-"""Low-rate, in-memory desktop previews for cameras already online in the counter.
-
-The desktop UI runs in a different process from the counting service. Preview
-connections therefore use their own bounded RTSP reader; they never alter the
-capture/AI pipeline, write images to disk or expose credentials in UI labels.
-"""
+"""Native desktop previews shared by the existing counting-service capture."""
 from __future__ import annotations
 
 from threading import Event
-from time import monotonic
+from pathlib import Path
+import json
+from time import monotonic, time
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import cv2
+import numpy as np
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from ..camera_manager import open_camera_source
-from ..privacy import anonymize_frame
+from ..video_stream import local_preview_directory
 from .components import Card
 
-PREVIEW_OPEN_TIMEOUT_MS = 10000
-
-
 def preview_camera_source(source: str) -> str:
-    """Keep full-quality inference while using Reolink's low-bandwidth preview."""
-    parts = urlsplit(source)
-    paths = {
-        "/h264Preview_01_main": "/h264Preview_01_sub",
-        "/Preview_01_main": "/Preview_01_sub",
-    }
-    if parts.scheme.lower() in {"rtsp", "rtsps"} and parts.path in paths:
-        return urlunsplit(parts._replace(path=paths[parts.path]))
+    """Keep the configured main stream; previews consume shared native frames."""
     return source
 
 
@@ -66,64 +52,59 @@ class _PreviewReader(QThread):
     image_ready = Signal(str, QImage)
     failed = Signal(str, str)
 
-    def __init__(
-        self, camera_id: str, source: str, parent: QWidget, *, pixel_size: int = 24
-    ) -> None:
+    def __init__(self, camera_id: str, source: str, parent: QWidget, project_root: Path) -> None:
         super().__init__(parent)
         self.camera_id = camera_id
         self.source = source
-        self.pixel_size = max(24, pixel_size)
+        self.output_dir = local_preview_directory(project_root)
         self._stop_requested = Event()
+        self._image_pending = Event()
+
+    def acknowledge_image(self) -> None:
+        self._image_pending.clear()
 
     def stop(self) -> None:
         self._stop_requested.set()
 
     def run(self) -> None:
-        capture = None
+        last_written = 0.0
         try:
-            capture = open_camera_source(
-                preview_camera_source(self.source), timeout_ms=PREVIEW_OPEN_TIMEOUT_MS
-            )
-            if not capture.isOpened():
-                self.failed.emit(self.camera_id, "Vorschau nicht erreichbar")
-                return
-            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            next_frame_at = 0.0
+
             while not self._stop_requested.is_set():
-                ok, frame = capture.read()
-                if not ok or frame is None or frame.size == 0:
-                    self.failed.emit(self.camera_id, "Vorschau unterbrochen")
+                # Atomic JPEG replacement and one pending frame per camera keep
+                # this reader current without decoding a second RTSP stream.
+                if self._stop_requested.wait(0.1):
                     break
-                now = monotonic()
-                if now < next_frame_at:
+                if self._image_pending.is_set():
+                    continue
+                try:
+                    meta = json.loads((self.output_dir / f"{self.camera_id}.json").read_text())
+                    written = float(meta["written_at"])
+                    if time() - written > 3.0:
+                        self.failed.emit(self.camera_id, "Vorschau veraltet")
+                        continue
+                    if written <= last_written:
+                        continue
+                    encoded = (self.output_dir / f"{self.camera_id}.jpg").read_bytes()
+                except (OSError, ValueError, KeyError, TypeError):
+                    self.failed.emit(self.camera_id, "Lokale Vorschau aus oder noch nicht verfügbar")
+                    continue
+                frame = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if frame is None or frame.size == 0:
                     continue
                 height, width = frame.shape[:2]
                 if width <= 0 or height <= 0:
                     continue
-                target_width = min(width, 800)
-                target_height = max(1, round(height * target_width / width))
-                if target_width != width:
-                    frame = cv2.resize(
-                        frame, (target_width, target_height), interpolation=cv2.INTER_AREA
-                    )
-                # Never deliver identifiable raw frames to the desktop.
-                # No tracked boxes are available in the independent preview reader,
-                # so person-only anonymization would be ineffective here.
-                frame = anonymize_frame(
-                    frame, mode="full_frame", pixel_size=self.pixel_size
-                )
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = QImage(
                     rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0],
                     QImage.Format_RGB888,
                 ).copy()
+                self._image_pending.set()
                 self.image_ready.emit(self.camera_id, image)
-                next_frame_at = now + 0.7  # previews must not saturate the GUI
+                last_written = written
         except (OSError, TypeError, ValueError, cv2.error):
             self.failed.emit(self.camera_id, "Vorschau nicht verfügbar")
-        finally:
-            if capture is not None:
-                capture.release()
 
 
 class _ClickableImage(QLabel):
@@ -165,6 +146,31 @@ class _PreviewTile(Card):
         self.image.setCursor(Qt.PointingHandCursor)
         self.image.clicked.connect(on_expand)
         layout.addWidget(self.image)
+        self.diagnostics = QLabel()
+        self.diagnostics.setWordWrap(True)
+        self.diagnostics.setProperty("muted", True)
+        layout.addWidget(self.diagnostics)
+
+    def show_diagnostics(self, camera: dict[str, Any]) -> None:
+        width = camera.get("actual_width", camera.get("width", "?"))
+        height = camera.get("actual_height", camera.get("height", "?"))
+        fps = camera.get("actual_fps", 0) or 0
+        try:
+            fps_text = f"{float(fps):.1f}"
+        except (TypeError, ValueError):
+            fps_text = "?"
+        self.diagnostics.setText(
+            f"{width} × {height} · {fps_text} Bilder/s\n"
+            f"Frames: {camera.get('frames_received', camera.get('frame_count', '?'))} empfangen / "
+            f"{camera.get('frames_processed', '?')} KI · "
+            f"Personen: {camera.get('detections', '?')} · Tracks: {camera.get('confirmed_tracks', '?')}\n"
+            f"Hailo: {camera.get('inference_status', '?')} · "
+            f"{camera.get('inference_latency_ms', '?')} ms · ReID: {camera.get('reid_status', '?')}\n"
+            f"Eintritte: {camera.get('entered', 0)} · Austritte: {camera.get('exited', 0)} · "
+            f"Sichtbar: {camera.get('visible', 0)}\n"
+            f"Abgelehnte Passagen: {camera.get('rejected_events', 0)} · "
+            f"Grund: {camera.get('last_rejection_reason') or 'keine'}"
+        )
 
     def show_image(self, frame: QImage) -> None:
         self.image.setPixmap(
@@ -199,6 +205,7 @@ class CameraPreviewPanel(QWidget):
         self._active = True
         self._preview_enabled = False  # Explicit opt-in in Datenschutz.
         self._pixel_size = 24
+        self._project_root = Path.cwd()
         self._readers: dict[str, _PreviewReader] = {}
         self._retiring: set[_PreviewReader] = set()
         self._tiles: dict[str, _PreviewTile] = {}
@@ -222,6 +229,8 @@ class CameraPreviewPanel(QWidget):
         for tile in self._tiles.values():
             tile.clear_image()
         self.update_cameras(self._latest_cameras, self._latest_sources)
+    def set_project_root(self, project_root: Path) -> None:
+        self._project_root = project_root
 
     def set_active(self, active: bool) -> None:
         if self._active == active:
@@ -250,7 +259,7 @@ class CameraPreviewPanel(QWidget):
         if not self._preview_enabled:
             self.summary.setText(
                 "Lokale Vorschau aus. Mit dem Schalter oben aktivieren; "
-                "Datenschutz: Bilder werden vollständig verpixelt."
+                "Es gelten die gespeicherten Datenschutzeinstellungen."
             )
         else:
             self.summary.setText(
@@ -276,19 +285,19 @@ class CameraPreviewPanel(QWidget):
                     camera_id, name, lambda _checked=False, cid=camera_id: self._expand(cid)
                 )
             self.grid.addWidget(self._tiles[camera_id], index // 2, index % 2)
+            camera = next((row for row in cameras if str(row.get("camera_id")) == camera_id), {})
+            self._tiles[camera_id].show_diagnostics(camera)
             reader = self._readers.get(camera_id)
             if reader is None or not reader.isRunning():
-                # Avoid opening a broken RTSP stream every 3-second UI refresh.
+                # Back off after a failed shared-frame reader.
                 if monotonic() < self._retry_after.get(camera_id, 0.0):
                     continue
                 if reader is not None:
                     self._stop_reader(camera_id)
-                reader = _PreviewReader(
-                    camera_id, source, self, pixel_size=self._pixel_size
-                )
+                reader = _PreviewReader(camera_id, source, self, self._project_root)
                 reader.image_ready.connect(
                     lambda cid, image, r=reader: (
-                        self._on_image(cid, image) if self._readers.get(cid) is r else None
+                        self._deliver_image(r, cid, image)
                     )
                 )
                 reader.failed.connect(
@@ -301,6 +310,13 @@ class CameraPreviewPanel(QWidget):
                 reader.start()
         if not desired and self._dialog is not None:
             self._dialog.close()
+
+    def _deliver_image(self, reader: _PreviewReader, camera_id: str, image: QImage) -> None:
+        try:
+            if self._readers.get(camera_id) is reader:
+                self._on_image(camera_id, image)
+        finally:
+            reader.acknowledge_image()
 
     def _on_image(self, camera_id: str, image: QImage) -> None:
         if not self._active or camera_id not in self._readers:
@@ -337,7 +353,11 @@ class CameraPreviewPanel(QWidget):
         label.setAlignment(Qt.AlignCenter)
         label.setMinimumSize(600, 360)
         label.setStyleSheet("background:#16191d;color:white;")
-        layout.addWidget(label)
+        scroll = QScrollArea()
+        scroll.setWidget(label)
+        scroll.setWidgetResizable(False)
+        layout.addWidget(QLabel("Native Auflösung (1:1) · Bild mit den Scrollleisten verschieben"))
+        layout.addWidget(scroll)
         self._dialog = dialog
         self._dialog_camera = camera_id
         self._dialog_label = label
@@ -349,12 +369,8 @@ class CameraPreviewPanel(QWidget):
     def _show_dialog_image(self, image: QImage) -> None:
         label = self._dialog_label
         if label is not None:
-            label.setPixmap(
-                QPixmap.fromImage(image).scaled(
-                    max(1, label.width()), max(1, label.height()),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation,
-                )
-            )
+            label.setPixmap(QPixmap.fromImage(image))
+            label.resize(image.width(), image.height())
 
     def _clear_dialog(self, dialog: QDialog) -> None:
         if self._dialog is dialog:
@@ -382,4 +398,4 @@ class CameraPreviewPanel(QWidget):
     def shutdown(self) -> None:
         self.set_active(False)
         for reader in list(self._retiring):
-            reader.wait(PREVIEW_OPEN_TIMEOUT_MS + 5000)
+            reader.wait(1000)

@@ -73,7 +73,10 @@ class IoUFallbackTracker(Tracker):
 
         for detection_index in unmatched_indices - used_detections:
             detection = detections[detection_index]
-            self._tracks[self._next_id] = _Track(self._next_id, detection.bbox, detection.confidence)
+            self._tracks[self._next_id] = _Track(
+                self._next_id, detection.bbox, detection.confidence,
+                state=(TrackState.CONFIRMED if self.config.min_confirmed_hits <= 1 else TrackState.TENTATIVE),
+            )
             self._next_id += 1
 
         for track_id, track in list(self._tracks.items()):

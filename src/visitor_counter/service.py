@@ -11,12 +11,13 @@ from urllib.parse import urlsplit
 from .camera_manager import CameraCapture, LatestFrameHub, camera_source_kind
 from .configuration import load_config, privacy_readiness_errors
 from .counter import GlobalCounts
-from .diagnostics import redact_sensitive
+from .diagnostics import redact_sensitive, read_host_metrics
 from .enhanced_counting import EnhancedProcessingPipeline
 from .license_guard import LicenseError, enforce_license
 from .logging_setup import configure_logging
 from .runtime_paths import RuntimePaths
 from .types import RuntimeStats
+from .video_stream import LocalPreviewExporter
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,13 +46,20 @@ class VisitorCounterService:
         ]
         self.live_status_path = self.paths.live_status_file
         self._last_status_write_at = 0.0
+        self.preview = LocalPreviewExporter(
+            self.project_root, enabled=self.config.display.show_camera_preview,
+            anonymization_mode=self.config.display.anonymization_mode,
+            pixel_size=self.config.display.pixel_size,
+        )
         self.pipeline = EnhancedProcessingPipeline(
             self.config,
             self.project_root,
             self.frame_hub,
             self.stop_event,
             stats_callback=self._on_stats,
+            frame_callback=self.preview.submit if self.preview.enabled else None,
         )
+        self.pipeline._gui_interval_seconds = 1.0 / max(self.preview.target_fps, 1.0)
 
     def run(self) -> int:
         try:
@@ -89,21 +97,25 @@ class VisitorCounterService:
                 ", ".join(missing),
             )
 
-        for capture in self.captures:
+        active_captures = [capture for capture in self.captures if capture.config.device]
+        for capture in active_captures:
             capture.start()
         self.pipeline.start()
 
+        exit_code = 0
         while not self.stop_event.is_set():
             if not self.pipeline.is_alive():
+                exit_code = 1
                 LOGGER.error("Inference pipeline stopped unexpectedly")
                 self.stop_event.set()
                 break
             sleep(0.5)
 
-        for capture in self.captures:
+        for capture in active_captures:
             capture.join(timeout=3.0)
         self.pipeline.join(timeout=5.0)
-        return 0
+        self.preview.close()
+        return exit_code
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -150,7 +162,21 @@ class VisitorCounterService:
                     "dropped_frames": cs.dropped_frames,
                     "decode_errors": cs.decode_errors,
                     "last_error": redact_sensitive(cs.last_error),
-                    "ai_processed_frames": stats.camera_processed_frames.get(camera.camera_id, 0),
+                    "ai_processed_frames": stats.camera_ai_processed_frames.get(camera.camera_id, 0),
+                    "ai_fps": stats.camera_ai_fps.get(camera.camera_id, 0.0),
+                    "detection_confidence": stats.camera_detection_confidence.get(camera.camera_id),
+                    "frames_received": capture._frame_id,
+                    "frames_processed": stats.camera_processed_frames.get(camera.camera_id, 0),
+                    "detections": stats.camera_person_detections.get(camera.camera_id, 0),
+                    "confirmed_tracks": stats.camera_confirmed_tracks.get(camera.camera_id, 0),
+                    "inference_status": stats.camera_inference_status.get(camera.camera_id, "waiting for frame"),
+                    "inference_latency_ms": stats.camera_inference_latency_ms.get(camera.camera_id),
+                    "reid_status": stats.reid_status,
+                    "rejected_events": self.pipeline.counters[camera.camera_id].rejected_events,
+                    "last_rejection_reason": self.pipeline.counters[camera.camera_id].last_rejection_reason,
+                    "rejection_counts": self.pipeline.counters[camera.camera_id].rejection_counts,
+                    "consensus_rejected_events": stats.camera_consensus_rejections.get(camera.camera_id, 0),
+                    "last_consensus_rejection_reason": stats.camera_last_consensus_reason.get(camera.camera_id, ""),
                     "ai_raw_person_detections": stats.camera_raw_person_detections.get(camera.camera_id, 0),
                     "ai_person_detections": stats.camera_person_detections.get(camera.camera_id, 0),
                     "ai_confirmed_tracks": stats.camera_confirmed_tracks.get(camera.camera_id, 0),
@@ -184,6 +210,8 @@ class VisitorCounterService:
             },
             "cameras": cameras,
             "runtime": {
+                **read_host_metrics(),
+                "latency": {k: {"mean_ms": v.mean_ms, "p95_ms": v.p95_ms} for k, v in stats.latency.items()},
                 "inference_fps": round(stats.inference_fps, 1),
                 "detector_enabled": self.config.model.detector_enabled,
                 "detector_active": stats.detector_active,
@@ -192,7 +220,6 @@ class VisitorCounterService:
                 "total_latency_ms": round(stats.total_latency_ms, 1),
                 "frame_age_ms": round(stats.frame_age_ms, 1),
                 "hailo_status": stats.hailo_status,
-                "detector_active": stats.detector_active,
                 "detector_error": redact_sensitive(stats.detector_error),
                 "hailo_device": stats.hailo_device,
                 "hailo_inference_count": stats.hailo_inference_count,
@@ -209,7 +236,7 @@ class VisitorCounterService:
         tmp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
         tmp.replace(self.live_status_path)
         try:
-            self.live_status_path.chmod(0o644)
+            self.live_status_path.chmod(0o600)
         except OSError:
             pass
 

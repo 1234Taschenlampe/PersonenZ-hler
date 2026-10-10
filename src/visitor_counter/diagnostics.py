@@ -20,7 +20,7 @@ from .reid_manager import OSNetReIDManager
 _SENSITIVE_KEY = re.compile(
     r"(?i)(password|passwd|token|secret|private.?key|credential|authorization)"
 )
-_URL_CREDENTIAL = re.compile(r"(?i)(rtsp|rtsps|https?)://([^:/\s]+):([^@/\s]+)@")
+_URL_CREDENTIAL = re.compile(r"(?i)(rtsp|rtsps|https?)://[^/\s]+@")
 _BEARER = re.compile(r"(?i)Bearer\s+[A-Za-z0-9._~+/=-]+")
 
 
@@ -64,8 +64,29 @@ def read_pi_temperature_c() -> float | None:
         return None
     try:
         return int(path.read_text(encoding="utf-8").strip()) / 1000.0
-    except ValueError:
+    except (OSError, ValueError):
         return None
+
+
+def read_host_metrics() -> dict[str, Any]:
+    """Nonblocking real system values; unavailable sensors remain null."""
+    try:
+        frequency = psutil.cpu_freq()
+    except (OSError, NotImplementedError):
+        frequency = None
+    throttled = None
+    try:
+        result = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                                text=True, timeout=0.2, check=False)
+        if result.returncode == 0:
+            throttled = int(result.stdout.strip().split("=")[-1], 16)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return {"cpu_percent": psutil.cpu_percent(interval=None),
+            "ram_percent": psutil.virtual_memory().percent,
+            "temperature_c": read_pi_temperature_c(),
+            "cpu_frequency_mhz": frequency.current if frequency else None,
+            "throttled": throttled}
 
 
 def collect_diagnostics(
@@ -109,6 +130,7 @@ def collect_diagnostics(
         }
     except (OSError, TypeError, ValueError) as exc:
         report["models_error"] = str(exc)
+    report = redact_sensitive(report)
     output = (output_dir or project_root / "logs") / "diagnostics_report.json"
     try:
         output.parent.mkdir(parents=True, exist_ok=True)

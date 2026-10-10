@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +96,8 @@ class OverviewPage(BasePage):
         self.inference_info.setProperty("muted", True)
         self.inference_info.setWordWrap(True)
         self.layout.addWidget(self.inference_info)
+        self.hardware_info = QLabel("Hardware: Messwerte werden geladen …")
+        self.layout.addWidget(self.hardware_info)
         self.preview_toggle = QCheckBox(
             "Anonymisierte Livebilder auf der Startseite anzeigen"
         )
@@ -117,6 +119,12 @@ class OverviewPage(BasePage):
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
             card.set_value(snapshot.counts.get(key, 0))
+        runtime = snapshot.runtime
+        self.hardware_info.setText(
+            f"Temperatur: {runtime.get('temperature_c', '—')} °C · "
+            f"CPU: {runtime.get('cpu_percent', '—')} % · RAM: {runtime.get('ram_percent', '—')} % · "
+            f"Takt: {runtime.get('cpu_frequency_mhz', '—')} MHz · Throttling: {runtime.get('throttled', '—')}"
+        )
         detector_active = snapshot.runtime.get("detector_active")
         hailo_status = str(snapshot.runtime.get("hailo_status", ""))
         runtime_ready = bool(detector_active) if detector_active is not None else (
@@ -190,7 +198,7 @@ class OverviewPage(BasePage):
         )
         self.updated.setText(
             "Aktualisiert: "
-            + datetime.fromtimestamp(snapshot.timestamp)
+            + datetime.fromtimestamp(snapshot.timestamp, timezone.utc)
             .astimezone()
             .strftime("%H:%M:%S")
         )
@@ -297,6 +305,9 @@ class CamerasPage(BasePage):
             test = QPushButton("Verbindung testen")
             test.clicked.connect(lambda _checked=False, cid=camera_id: self._test(cid))
             form.addRow(QLabel(f"{camera_id.replace('_', ' ').title()}"), status)
+            diagnostics = QLabel("Live-Diagnosen werden geladen …")
+            diagnostics.setWordWrap(True)
+            form.addRow("Live-Diagnosen", diagnostics)
             form.addRow("Anzeigename", name)
             form.addRow("Kameraquelle", source)
             form.addRow("IP-Adresse (manuell)", ip_address)
@@ -332,6 +343,7 @@ class CamerasPage(BasePage):
                 "exit_direction": exit_direction,
                 "counting_mode": counting_mode,
                 "status": status,
+                "diagnostics": diagnostics,
             }
             self.layout.addWidget(card)
         self.layout.addStretch()
@@ -515,6 +527,18 @@ class CamerasPage(BasePage):
                 detail += " · " + str(camera["last_error"])[:95]
             badge: StatusBadge = self.cards[camera_id]["status"]  # type: ignore[assignment]
             badge.set_state("ok" if online else "warning", detail)
+            self.cards[camera_id]["diagnostics"].setText(
+                f"Dekodiert: {width or '—'} × {height or '—'} · {camera.get('actual_fps', '—')} FPS\n"
+                f"Frames: {camera.get('frames_received', '—')} empfangen / {camera.get('ai_processed_frames', '—')} KI · "
+                f"KI-FPS: {camera.get('ai_fps', '—')}\n"
+                f"Personen: {camera.get('ai_person_detections', '—')} · Tracks: {camera.get('ai_confirmed_tracks', '—')} · "
+                f"Confidence: {camera.get('detection_confidence') or '—'}\n"
+                f"Hailo: {camera.get('inference_status', '—')} · {camera.get('inference_latency_ms') or '—'} ms · "
+                f"ReID: {camera.get('reid_status', '—')}\n"
+                f"Eintritte: {camera.get('entered', 0)} · Austritte: {camera.get('exited', 0)} · Sichtbar: {camera.get('visible', 0)}\n"
+                f"Abgelehnt: {camera.get('rejected_events', 0)} · {camera.get('last_rejection_reason') or 'keine'} · "
+                f"Consensus: {camera.get('consensus_rejected_events', 0)} · {camera.get('last_consensus_rejection_reason') or 'keine'}"
+            )
 
     def set_test_result(self, source: str, ok: bool, message: str) -> None:
         for controls in self.cards.values():

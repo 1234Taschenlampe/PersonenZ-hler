@@ -58,6 +58,14 @@ class DualCameraConsensus:
                 continue
             if previous.direction != event.direction:
                 continue
+            # Geometry and timing cannot override identities assigned by ReID.
+            # Distinct people crossing in the same window are independent.
+            if (
+                previous.global_person_id is not None
+                and event.global_person_id is not None
+                and previous.global_person_id != event.global_person_id
+            ):
+                continue
             age = event.timestamp - previous.timestamp
             if age < 0 or age > self.config.uncertain_window_seconds:
                 continue

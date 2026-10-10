@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 720)
         self.resize(1420, 900)
         self._build_ui()
+        self.pages["Übersicht"].preview_panel.set_project_root(self.paths.project_root)
         self._load_config_into_pages()
         self._connect_pages()
         self.refresh()

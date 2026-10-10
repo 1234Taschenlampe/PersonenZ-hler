@@ -114,3 +114,47 @@ def test_both_default_cameras_accept_both_directions() -> None:
         assert camera.entry_direction in ("A_to_B", "B_to_A")
         assert camera.exit_direction in ("A_to_B", "B_to_A")
         assert camera.entry_direction != camera.exit_direction
+
+
+def test_same_confirmed_track_can_enter_and_return_without_disappearing() -> None:
+    c = counter()
+    c.update(1, [track(1, 80)])
+    assert [e.direction for e in c.update(2, [track(2, 120)])] == [Direction.IN]
+    assert not c.update(3, [track(3, 120)])
+    assert [e.direction for e in c.update(4, [track(4, 80)])] == [Direction.OUT]
+    assert c.counts.inside == 0
+    assert c.counts.entered == c.counts.exited == 1
+
+
+def test_crossing_before_confirmation_is_counted_once_when_track_confirms() -> None:
+    from dataclasses import replace
+
+    c = counter()
+    c.update(1, [replace(track(1, 80), state=TrackState.TENTATIVE)])
+    assert not c.update(2, [replace(track(2, 120), state=TrackState.TENTATIVE)])
+    assert c.last_rejection_reason == "track_not_confirmed"
+    assert c.rejection_counts["track_not_confirmed"] == 1
+    assert [e.direction for e in c.update(3, [track(3, 120)])] == [Direction.IN]
+    for frame in range(4, 100):
+        assert not c.update(frame, [track(frame, 120)])
+    assert c.counts.entered == 1
+    assert c.rejected_events == 1
+
+
+def test_dropped_capture_frames_do_not_establish_counting_history() -> None:
+    c = counter()
+    c.tracking_config.min_confirmed_track_hits = 5
+    c.update(1, [track(1, 80)])
+    assert not c.update(100, [track(2, 120)])
+    assert not c.update(101, [track(3, 120)])
+    assert not c.update(102, [track(4, 120)])
+    assert [e.direction for e in c.update(103, [track(5, 120)])] == [Direction.IN]
+
+
+def test_stationary_person_on_either_side_never_counts() -> None:
+    for y in (80, 100, 120):
+        c = counter()
+        for frame in range(1, 150):
+            assert not c.update(frame, [track(frame, y)])
+        assert c.counts.visible == 1
+        assert c.counts.inside == c.counts.entered == c.counts.exited == 0

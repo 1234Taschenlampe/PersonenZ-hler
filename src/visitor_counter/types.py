@@ -205,6 +205,13 @@ def summarize_latency(values: list[float]) -> LatencySummary:
 
 @dataclass
 class RuntimeStats:
+    camera_ai_processed_frames: dict[str, int] = field(default_factory=dict)
+    camera_ai_fps: dict[str, float] = field(default_factory=dict)
+    camera_inference_status: dict[str, str] = field(default_factory=dict)
+    camera_detection_confidence: dict[str, float | None] = field(default_factory=dict)
+    camera_consensus_rejections: dict[str, int] = field(default_factory=dict)
+    camera_last_consensus_reason: dict[str, str] = field(default_factory=dict)
+    camera_inference_latency_ms: dict[str, float | None] = field(default_factory=dict)
     inference_fps: float = 0.0
     camera_processed_frames: dict[str, int] = field(default_factory=dict)
     camera_raw_person_detections: dict[str, int] = field(default_factory=dict)

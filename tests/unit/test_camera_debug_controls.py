@@ -12,6 +12,7 @@ from visitor_counter.desktop.live_preview import CameraPreviewPanel
 from visitor_counter.desktop.pages import SettingsPage
 from visitor_counter.identity_manager import GlobalIdentityManager
 from visitor_counter.inference_pipeline import ProcessingPipeline
+from visitor_counter.types import RuntimeStats
 from visitor_counter import service as service_module
 
 
@@ -49,7 +50,10 @@ def _service_without_hardware(tmp_path: Path, monkeypatch):
     instance.stop_event = Event()
     instance.stop_event.set()  # No main loop / hardware is required.
     instance.captures = [_StubWorker(), _StubWorker()]
+    for worker, camera in zip(instance.captures, instance.config.cameras.values()):
+        worker.config = camera
     instance.pipeline = _StubWorker()
+    instance.preview = SimpleNamespace(close=lambda: None)
     return instance
 
 
@@ -59,7 +63,8 @@ def test_service_accepts_one_configured_camera(tmp_path: Path, monkeypatch) -> N
     service.config.cameras["camera_2"].device = None
     assert service.run() == 0
     assert service.pipeline.started
-    assert all(worker.started for worker in service.captures)
+    assert service.captures[0].started
+    assert not service.captures[1].started
 
 
 def test_service_still_blocks_if_both_cameras_missing(tmp_path: Path, monkeypatch) -> None:
@@ -74,7 +79,9 @@ def test_disabled_yolo_never_calls_hailo_detector() -> None:
     pipeline = ProcessingPipeline.__new__(ProcessingPipeline)
     pipeline.config = AppConfig()
     pipeline.config.model.detector_enabled = False
-    assert pipeline._detect(object()) == []
+    pipeline.runtime_stats = RuntimeStats()
+    assert pipeline._detect(SimpleNamespace(camera_id="camera_1")) == []
+    assert pipeline.runtime_stats.camera_inference_status["camera_1"] == "paused"
 
 
 def test_disabled_reid_prevents_geometry_only_cross_camera_match() -> None:

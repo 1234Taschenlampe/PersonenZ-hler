@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Thread
@@ -64,6 +65,7 @@ class ProcessingPipeline(Thread):
         self.frame_callback = frame_callback
         self.stats_callback = stats_callback
         self.runtime_stats = RuntimeStats()
+        self._camera_ai_ticks: dict[str, deque[float]] = {}
         self.latency_window = LatencyWindow()
         self.global_counts = GlobalCounts()
         self.model = ModelManager(config.model, project_root)
@@ -148,6 +150,8 @@ class ProcessingPipeline(Thread):
                 self.runtime_stats.detector_error = str(exc)
                 LOGGER.error("Processing pipeline cannot start: %s", exc)
                 self._emit_stats()
+                self.hailo.close()
+                self.reid.close()
                 self.database.close()
                 return
         frames = 0
@@ -180,21 +184,33 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.camera_obstruction_reason[packet.camera_id] = obstruction.reason
             detect_start = monotonic()
             raw_detections = [] if obstruction.obstructed else self._detect(packet)
+            if obstruction.obstructed:
+                self.runtime_stats.camera_inference_status[packet.camera_id] = "obstructed"
             detections = self._filter_person_detections(
                 raw_detections, packet.width, packet.height
             )
             self.runtime_stats.camera_raw_person_detections[packet.camera_id] = len(raw_detections)
             self.runtime_stats.camera_person_detections[packet.camera_id] = len(detections)
+            self.runtime_stats.camera_detection_confidence[packet.camera_id] = max(
+                (d.confidence for d in detections), default=None
+            )
             stage_ms["detect_total_ms"] = (monotonic() - detect_start) * 1000.0
             stage_ms.update(self.hailo.last_stage_ms)
+            self.runtime_stats.camera_inference_latency_ms[packet.camera_id] = (
+                self.hailo.last_latency_ms
+                if self.runtime_stats.camera_inference_status.get(packet.camera_id) == "active"
+                else None
+            )
             tracker_start = monotonic()
             tracks = self.trackers[packet.camera_id].update(
                 packet.camera_id, detections
             )
             stage_ms["tracker_ms"] = (monotonic() - tracker_start) * 1000.0
-            countable_tracks = self._filter_live_count_tracks(
-                tracks, packet.width, packet.height
+            observed_tracks = self._filter_live_count_tracks(
+                tracks, packet.width, packet.height, confirmed_only=False
             )
+            countable_tracks = [track for track in observed_tracks if track.confirmed]
+            tentative_tracks = [track for track in observed_tracks if not track.confirmed]
             reid_start = monotonic()
             tracks = self._with_reid_embeddings(packet, countable_tracks)
             stage_ms["osnet_reid_ms"] = (monotonic() - reid_start) * 1000.0
@@ -227,7 +243,8 @@ class ProcessingPipeline(Thread):
                 []
                 if obstruction.obstructed
                 else self.counters[packet.camera_id].update(
-                    packet.frame_id, tracks, frame_size=(packet.width, packet.height)
+                    packet.frame_id, tracks + tentative_tracks,
+                    frame_size=(packet.width, packet.height)
                 )
             )
             for event in events:
@@ -256,6 +273,10 @@ class ProcessingPipeline(Thread):
                     )
                 else:
                     reason = decision.reason or "suppressed_or_uncertain"
+                    self.runtime_stats.camera_consensus_rejections[packet.camera_id] = (
+                        self.runtime_stats.camera_consensus_rejections.get(packet.camera_id, 0) + 1
+                    )
+                    self.runtime_stats.camera_last_consensus_reason[packet.camera_id] = reason
                     LOGGER.info(
                         "COUNT_REJECTED camera=%s reason=%s", camera_num, reason
                     )
@@ -267,17 +288,17 @@ class ProcessingPipeline(Thread):
                     self.global_counts.exited,
                 )
             draw_start = monotonic()
-            annotated = self._annotate(packet, tracks)
-            stage_ms["draw_boxes_ms"] = (monotonic() - draw_start) * 1000.0
             gui_start = monotonic()
             if (
                 self.frame_callback
                 and gui_start >= self._next_gui_emit_at[packet.camera_id]
             ):
+                annotated = self._annotate(packet, tracks)
                 self.frame_callback(packet.camera_id, annotated, tracks)
                 self._next_gui_emit_at[packet.camera_id] = (
                     gui_start + self._gui_interval_seconds
                 )
+            stage_ms["draw_boxes_ms"] = (monotonic() - draw_start) * 1000.0
             stage_ms["gui_transfer_ms"] = (monotonic() - gui_start) * 1000.0
             frames += 1
             now = monotonic()
@@ -434,12 +455,13 @@ class ProcessingPipeline(Thread):
         return filtered
 
     def _filter_live_count_tracks(
-        self, tracks: list[TrackedObject], frame_width: int, frame_height: int
+        self, tracks: list[TrackedObject], frame_width: int, frame_height: int,
+        *, confirmed_only: bool = True,
     ) -> list[TrackedObject]:
         return [
             track
             for track in tracks
-            if track.confirmed
+            if (track.confirmed or not confirmed_only)
             and track.lost_frames == 0
             and track.confidence >= self.config.identity.live_min_confidence
             and self._bbox_is_person_like(track.bbox, frame_width, frame_height)
@@ -500,13 +522,20 @@ class ProcessingPipeline(Thread):
 
     def _detect(self, packet: FramePacket) -> list[Detection]:
         if not self.config.model.detector_enabled:
+            self.runtime_stats.camera_inference_status[packet.camera_id] = "paused"
             return []
         if not self.hailo.ready:
+            self.runtime_stats.camera_inference_status[packet.camera_id] = "unavailable"
             self.runtime_stats.detector_active = False
             self.runtime_stats.detector_error = self.hailo.status
             return []
         try:
             detections = self.hailo.infer(packet.image)
+            self.runtime_stats.camera_inference_status[packet.camera_id] = "active"
+            self.runtime_stats.camera_ai_processed_frames[packet.camera_id] = (
+                self.runtime_stats.camera_ai_processed_frames.get(packet.camera_id, 0) + 1
+            )
+            self._camera_ai_ticks.setdefault(packet.camera_id, deque(maxlen=120)).append(monotonic())
             self.runtime_stats.detector_active = True
             self.runtime_stats.detector_error = ""
             detections = [
@@ -534,6 +563,7 @@ class ProcessingPipeline(Thread):
                 )
             return detections
         except HailoUnavailableError as exc:
+            self.runtime_stats.camera_inference_status[packet.camera_id] = "error"
             self.runtime_stats.hailo_status = str(exc)
             self.runtime_stats.detector_active = False
             self.runtime_stats.detector_error = str(exc)
@@ -637,6 +667,11 @@ class ProcessingPipeline(Thread):
         return image
 
     def _emit_stats(self) -> None:
+        now = monotonic()
+        for camera_id, ticks in self._camera_ai_ticks.items():
+            while ticks and now - ticks[0] >= 1.0:
+                ticks.popleft()
+            self.runtime_stats.camera_ai_fps[camera_id] = float(len(ticks))
         if self.stats_callback:
             self.stats_callback(self.runtime_stats, self.global_counts)
 

@@ -31,6 +31,9 @@ class _TrackMemory:
     initial_side: str | None = None
     last_confirmed_track: TrackedObject | None = None
     last_near_edge: bool = False
+    observed_frames: int = 0
+    zone_revision: int = 0
+    counted_zone_revision: int = -1
 
 
 class LineCrossingCounter:
@@ -47,6 +50,9 @@ class LineCrossingCounter:
         self.camera_config = camera_config
         self.counts = LocalCounts()
         self._tracks: dict[int, _TrackMemory] = {}
+        self.rejected_events = 0
+        self.last_rejection_reason = ""
+        self.rejection_counts: dict[str, int] = {}
 
         # Precompute line details
         ax, ay = self.line.start
@@ -60,7 +66,16 @@ class LineCrossingCounter:
     def reset(self) -> None:
         self.counts = LocalCounts()
         self._tracks.clear()
+        self.rejected_events = 0
+        self.last_rejection_reason = ""
+        self.rejection_counts.clear()
         LOGGER.info("Counter reset for %s", self.camera_id)
+
+    def _reject(self, reason: str) -> None:
+        self.rejected_events += 1
+        self.last_rejection_reason = reason
+        self.rejection_counts[reason] = self.rejection_counts.get(reason, 0) + 1
+        LOGGER.debug("COUNT_REJECTED camera=%s reason=%s", self.camera_id, reason)
 
     def update(
         self, frame_id: int, tracks: list[TrackedObject],
@@ -88,14 +103,12 @@ class LineCrossingCounter:
                 continue
             # Check bounding box validity and area first
             if track.bbox.width <= 1 or track.bbox.height <= 1:
-                LOGGER.debug("COUNT_REJECTED camera=%s reason=invalid_bbox", camera_num)
+                self._reject("invalid_bbox")
                 continue
 
             area = track.bbox.area
             if area < self.tracking_config.minimum_bbox_area:
-                LOGGER.debug(
-                    "COUNT_REJECTED camera=%s reason=outside_counting_area", camera_num
-                )
+                self._reject("bbox_too_small")
                 continue
 
             # Compute anchor (use center for stability as requested)
@@ -147,6 +160,7 @@ class LineCrossingCounter:
 
             memory.previous_center = anchor
             memory.last_seen_frame = frame_id
+            memory.observed_frames += 1
             if track.confirmed:
                 memory.last_confirmed_track = track
             margin = min(
@@ -186,14 +200,20 @@ class LineCrossingCounter:
                         or memory.stable_zone_history[-1] != new_stable
                     ):
                         memory.stable_zone_history.append(new_stable)
-                        # Process potential transition
-                        if self.camera_config.counting_mode == "line":
-                            events.extend(self._process_transition(track, memory, frame_id))
+                        memory.zone_revision += 1
+                        # Only the latest transition is needed. Bound memory
+                        # for people who remain visible for a long time.
+                        memory.stable_zone_history = memory.stable_zone_history[-12:]
             else:
                 # No stable zone change this frame
                 LOGGER.debug(
                     "COUNT_REJECTED camera=%s reason=no_zone_change", camera_num
                 )
+
+            # A real crossing can precede track confirmation. Retain it until
+            # confirmation instead of requiring another zone change to count.
+            if self.camera_config.counting_mode == "line":
+                events.extend(self._process_transition(track, memory, frame_id))
 
         # Confirm a passage at disappearance only when the person has a
         # verified A->B/B->A transition AND was last seen near a real image
@@ -247,6 +267,14 @@ class LineCrossingCounter:
         ):
             return []
 
+        # Already handled transitions are normal steady-state observations,
+        # not rejected passages. Avoid logging them at camera frame rate.
+        if (
+            memory.counted_zone_revision == memory.zone_revision
+            or (on_disappearance and memory.counted)
+        ):
+            return []
+
         # We have a transition! Either A -> B or B -> A
         transition = f"{prev_non_neutral}_to_{current_stable}"
 
@@ -258,37 +286,29 @@ class LineCrossingCounter:
             direction = Direction.OUT
 
         # Validate count constraints and log rejections if any fail
-        camera_num = 1 if self.camera_id == "camera_1" else 2
         if not track.confirmed:
-            LOGGER.info(
-                "COUNT_REJECTED camera=%s reason=track_not_confirmed", camera_num
-            )
+            self._reject("track_not_confirmed")
             return []
 
-        hits = frame_id - memory.first_seen_frame + 1
+        # Capture IDs may skip arbitrarily many frames when queues drop old
+        # images. Only genuine observations establish counting history.
+        hits = memory.observed_frames
         if hits < self.tracking_config.min_confirmed_track_hits:
-            LOGGER.info(
-                "COUNT_REJECTED camera=%s reason=insufficient_history", camera_num
-            )
-            return []
-
-        if memory.counted:
-            LOGGER.info("COUNT_REJECTED camera=%s reason=already_counted", camera_num)
+            self._reject("insufficient_history")
             return []
 
         now = time()
         if now - memory.last_count_time < self.tracking_config.count_cooldown_seconds:
-            LOGGER.info("COUNT_REJECTED camera=%s reason=cooldown_active", camera_num)
+            self._reject("cooldown_active")
             return []
 
         if track.confidence < self.tracking_config.minimum_confidence:
-            LOGGER.info(
-                "COUNT_REJECTED camera=%s reason=confidence_too_low", camera_num
-            )
+            self._reject("confidence_too_low")
             return []
 
         # All checks passed! Count it
         memory.counted = True
+        memory.counted_zone_revision = memory.zone_revision
         memory.last_count_time = now
 
         if direction == Direction.IN:

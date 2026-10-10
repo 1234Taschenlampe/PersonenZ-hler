@@ -15,3 +15,8 @@ def test_diagnostic_redaction_removes_nested_secrets_and_url_credentials() -> No
     assert "abcdefghijklmnopqrstuvwxyz" not in serialized
     assert "key material" not in serialized
     assert "<redacted>" in serialized
+
+
+def test_url_redaction_handles_username_only_and_at_sign_in_password():
+    assert redact_sensitive("rtsp://operator@host/live") == "rtsp://<redacted>@host/live"
+    assert redact_sensitive("rtsp://operator:pass@word@host/live") == "rtsp://<redacted>@host/live"

@@ -27,3 +27,9 @@ def test_tracker_uses_one_detection_per_track() -> None:
     tracker.update("camera_1", [Detection(BoundingBox(0, 0, 50, 100), 0.9), Detection(BoundingBox(100, 0, 150, 100), 0.9)])
     tracks = tracker.update("camera_1", [Detection(BoundingBox(4, 0, 54, 100), 0.9), Detection(BoundingBox(104, 0, 154, 100), 0.9)])
     assert len({track.track_id for track in tracks if track.lost_frames == 0}) == 2
+
+
+def test_one_hit_configuration_confirms_first_observation() -> None:
+    tracker = IoUFallbackTracker(TrackingConfig(min_confirmed_hits=1))
+    tracks = tracker.update("camera_1", [Detection(BoundingBox(0, 0, 50, 100), 0.9)])
+    assert tracks[0].state is TrackState.CONFIRMED
