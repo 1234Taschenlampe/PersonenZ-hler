@@ -238,21 +238,58 @@ class MainWindow(QMainWindow):
             for camera_id, camera in config.cameras.items()
             if camera.device
         }
+        overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
+        overview.preview_panel.set_preview_policy(
+            enabled=config.display.show_camera_preview,
+            pixel_size=config.display.pixel_size,
+        )
         self.pages["Kameras"].set_config(config)  # type: ignore[attr-defined]
         self.pages["Datenschutz"].set_config(config)  # type: ignore[attr-defined]
         self.pages["Einstellungen"].set_config(config)  # type: ignore[attr-defined]
 
     def _save_values(self, values: dict[str, Any]) -> None:
+        def existing_value(config: Any, key: str) -> Any:
+            target = config
+            for part in key.split("."):
+                target = getattr(target, part)
+            return target
+
+        runtime_fields = {
+            "model.detector_enabled", "model.reid_required",
+            "model.confidence_threshold", "identity.reid_threshold",
+            "timeout.presence_timeout_minutes", "privacy.video_stream_enabled",
+            "database.store_events", "database.retention_hours",
+        }
         try:
+            before = self.settings_service.load()
+            changed_runtime = any(
+                key in runtime_fields and existing_value(before, key) != value
+                for key, value in values.items()
+            )
             self.settings_service.update(values)
-        except SettingsError as exc:
+        except (SettingsError, AttributeError) as exc:
             QMessageBox.warning(self, "Einstellungen nicht gespeichert", str(exc))
             return
         self._load_config_into_pages()
-        self.global_status.setText(
-            "Einstellungen gespeichert · Dienst gegebenenfalls neu starten"
-        )
-        self.refresh()
+        if changed_runtime:
+            self.global_status.setText(
+                "Einstellungen gespeichert · aktiver Zähldienst wird aktualisiert …"
+            )
+
+            def restart_if_running() -> str:
+                manager = self.application_service.service_manager
+                if manager.status().active_state != "active":
+                    return "Gespeichert. Zähldienst ist gestoppt; unter System starten."
+                manager.action("restart")
+                return "Neue KI- und Zähleinstellungen aktiv; Dienst neu gestartet."
+
+            self._run_worker(
+                restart_if_running,
+                lambda message: (self.global_status.setText(message), self.refresh()),
+            )
+        else:
+            self.global_status.setText("Einstellungen gespeichert")
+            self.refresh()
 
     def _save_cameras(self, values: dict[str, dict[str, str]]) -> None:
         try:
