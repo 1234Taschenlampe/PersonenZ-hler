@@ -316,6 +316,9 @@ class CamerasPage(BasePage):
             if parsed.scheme.lower() in {"rtsp", "rtsps"} and parsed.hostname:
                 controls["ip_address"].setText(parsed.hostname)  # type: ignore[attr-defined]
                 controls["rtsp_port"].setValue(parsed.port or 554)  # type: ignore[attr-defined]
+                stream: QComboBox = controls["stream"]  # type: ignore[assignment]
+                current_stream = "main" if parsed.path.endswith("_main") else "sub"
+                stream.setCurrentIndex(max(0, stream.findData(current_stream)))
             role: QComboBox = controls["role"]  # type: ignore[assignment]
             role.setCurrentIndex(max(0, role.findData(camera.role)))
             entry: QComboBox = controls["entry_direction"]  # type: ignore[assignment]
@@ -827,6 +830,20 @@ class SettingsPage(BasePage):
         self.reid = QDoubleSpinBox()
         self.reid.setRange(0.50, 0.99)
         self.reid.setSingleStep(0.01)
+        self.detector_enabled = QCheckBox(
+            "YOLO26m-Personenerkennung und Zählung aktivieren"
+        )
+        self.detector_enabled.setToolTip(
+            "Aus: Beide Kameras können weiter Bilder liefern, aber es werden "
+            "keine neuen Personenerkennungen oder Zählereignisse erzeugt."
+        )
+        self.reid_enabled = QCheckBox(
+            "OSNet-Re-ID und kameraübergreifende Zuordnung aktivieren"
+        )
+        self.reid_enabled.setToolTip(
+            "Aus: Die Linienzählung bleibt aktiv, aber keine sichere "
+            "kameraübergreifende Wiedererkennung oder eindeutige Tageszählung."
+        )
         self.timeout = QSpinBox()
         self.timeout.setRange(1, 1440)
         self.timeout.setSuffix(" Minuten")
@@ -844,6 +861,8 @@ class SettingsPage(BasePage):
         key_button.clicked.connect(lambda: self._choose_tls("private_key"))
         form.addRow("Detektionsschwelle", self.confidence)
         form.addRow("Re-ID-Schwelle", self.reid)
+        form.addRow("", self.detector_enabled)
+        form.addRow("", self.reid_enabled)
         form.addRow("Anwesenheits-Timeout", self.timeout)
         form.addRow("", self.api_enabled)
         form.addRow("API-Bindung", self.api_host)
@@ -868,6 +887,8 @@ class SettingsPage(BasePage):
     def set_config(self, config: AppConfig) -> None:
         self.confidence.setValue(config.model.confidence_threshold)
         self.reid.setValue(config.identity.reid_threshold)
+        self.detector_enabled.setChecked(config.model.detector_enabled)
+        self.reid_enabled.setChecked(config.model.reid_required)
         self.timeout.setValue(config.timeout.presence_timeout_minutes)
         self.api_enabled.setChecked(config.api.enabled)
         self.api_host.setText(config.api.bind_host)
@@ -880,6 +901,8 @@ class SettingsPage(BasePage):
             {
                 "model.confidence_threshold": self.confidence.value(),
                 "identity.reid_threshold": self.reid.value(),
+                "model.detector_enabled": self.detector_enabled.isChecked(),
+                "model.reid_required": self.reid_enabled.isChecked(),
                 "timeout.presence_timeout_minutes": self.timeout.value(),
                 "api.enabled": self.api_enabled.isChecked(),
                 "api.bind_host": self.api_host.text().strip(),
