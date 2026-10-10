@@ -40,8 +40,9 @@ class GlobalIdentityManager:
     geometry alone to reconnect old identities.
     """
 
-    def __init__(self, config: IdentityConfig) -> None:
+    def __init__(self, config: IdentityConfig, *, cross_camera_matching: bool = True) -> None:
         self.config = config
+        self.cross_camera_matching = cross_camera_matching
         self._next_global_id = 1
         self._local_to_global: dict[tuple[str, int], int] = {}
         self._profiles: dict[int, _GlobalProfile] = {}
@@ -92,6 +93,10 @@ class GlobalIdentityManager:
         return value
 
     def _match_existing(self, camera_id: str, track: TrackedObject, timestamp: float, frame_width: int, frame_height: int) -> int | None:
+        # No appearance embeddings: never infer cross-camera identity from
+        # geometry and timing alone when the user has switched Re-ID off.
+        if not self.cross_camera_matching:
+            return None
         candidate = self._profile(0, camera_id, track, timestamp, frame_width, frame_height)
         best_id: int | None = None
         best_score = -1.0
