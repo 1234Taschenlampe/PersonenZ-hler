@@ -195,7 +195,9 @@ def neighbor_lan_hosts(cidr: str = "") -> list[str]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if str(row.get("state", "")).upper() in {"FAILED", "INCOMPLETE", "NOARP"}:
+        raw_state = row.get("state", "")
+        states = raw_state if isinstance(raw_state, list) else [raw_state]
+        if any(str(state).upper() in {"FAILED", "INCOMPLETE", "NOARP"} for state in states):
             continue
         try:
             address = ipaddress.IPv4Address(str(row["dst"]))
