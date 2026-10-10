@@ -115,6 +115,7 @@ def test_expanded_preview_preserves_native_image_pixels() -> None:
 def test_reader_decodes_shared_frame_without_opening_camera(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication([])
+    assert app is not None
     panel = CameraPreviewPanel()
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     cv2.imwrite(str(tmp_path / "camera_2.jpg"), frame)
