@@ -158,6 +158,9 @@ class VisitorCounterService:
             "cameras": cameras,
             "runtime": {
                 "inference_fps": round(stats.inference_fps, 1),
+                "detector_enabled": self.config.model.detector_enabled,
+                "detector_active": stats.detector_active,
+                "reid_enabled": self.config.model.reid_required,
                 "hailo_latency_ms": round(stats.inference_latency_ms, 1),
                 "total_latency_ms": round(stats.total_latency_ms, 1),
                 "frame_age_ms": round(stats.frame_age_ms, 1),
