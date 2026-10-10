@@ -62,6 +62,27 @@ HailoRT und die Firmware sind hardwarespezifische Herstellerkomponenten. Die Anw
 - signierte Ed25519-Lizenzen; der private Herausgeberschlüssel ist nicht Bestandteil des Repositorys oder Pakets
 - datenschutzfreundliche Voreinstellungen: lokale Verarbeitung, keine Aufzeichnung, keine Gesichtserkennung, granulare Ereignisse aus
 
+## Bedienung der KI und Netzwerksuche
+
+Unter **Einstellungen** lassen sich **YOLO26m** und **OSNet-Re-ID** unabhängig
+aktivieren. Ist YOLO ausgeschaltet, laufen konfigurierte Kameras und ihre
+Statusanzeige weiter, es werden aber keine neuen Zählereignisse erzeugt.
+Ohne OSNet bleibt die Linienzählung aktiv; eine verlässliche
+kameraübergreifende Wiedererkennung bzw. eindeutige Tageszählung ist dann
+nicht gewährleistet. Änderungen werden bei laufendem Zähldienst per
+Dienstneustart übernommen.
+
+Die **Übersicht** enthält einen Schalter für zwei **lokale, vollständig
+verpixelte Kameravorschauen** mit Klick zum Vergrößern. Er ist aus
+Datenschutzgründen zunächst ausgeschaltet. Auch mit nur einer tatsächlich
+verfügbaren bzw. konfigurierten Kamera ist die Zählung möglich.
+
+Die Netzwerksuche kombiniert RTSP-Porterkennung, ONVIF und bereits
+sichtbare lokale LAN-Nachbarn. Letztere sind nur Gerätehinweise und
+werden **nicht** als geprüfte IP-Kameras oder Videoströme ausgegeben.
+Nach der Auswahl sind Anmeldung und der Test auf echte Videoframes nötig.
+Kamerapasswörter niemals in GitHub-Quellcode, Issues oder Logdateien eintragen.
+
 ## Zählmodell
 
 - **Aktuell im Gebäude:** ändert sich nur durch bestätigte Linienübertritte, nicht durch sichtbare Bounding Boxes.
