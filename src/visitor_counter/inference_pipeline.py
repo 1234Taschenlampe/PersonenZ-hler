@@ -78,7 +78,9 @@ class ProcessingPipeline(Thread):
         self._restore_counts()
         self.consensus = DualCameraConsensus(config.consensus)
         self.reid = OSNetReIDManager(config.model, project_root)
-        self.identity = GlobalIdentityManager(config.identity)
+        self.identity = GlobalIdentityManager(
+            config.identity, cross_camera_matching=config.model.reid_required
+        )
         self.trackers = {
             camera_id: create_tracker(config.tracking)[0]
             for camera_id in config.cameras
@@ -114,34 +116,40 @@ class ProcessingPipeline(Thread):
 
     def run(self) -> None:
         LOGGER.info("Starting processing pipeline")
-        try:
-            model_status = self.model.require_available()
-            self.runtime_stats.active_hef = str(model_status.path)
-            self.runtime_stats.active_hef_sha256 = model_status.sha256
-            self.runtime_stats.model_type = model_status.model_type
-            if self.config.model.reid_required:
-                reid_status = self.reid.require_available(validate_hailo=True)
-                self.runtime_stats.reid_status = reid_status.message
-                self.runtime_stats.reid_hef_sha256 = reid_status.sha256
-            else:
-                self.runtime_stats.reid_status = "OSNet ReID disabled by configuration"
-                self.runtime_stats.reid_hef_sha256 = ""
-            self.hailo.initialize()
-            if self.config.model.reid_required:
-                self.reid.initialize()
-                self.runtime_stats.reid_status = self.reid.status_message
-            self.runtime_stats.hailo_status = self.hailo.status
-            self.runtime_stats.hailo_architecture = self.hailo.hailo_architecture
-            self.runtime_stats.hailo_device = self.hailo.hailo_device
-            self.runtime_stats.backend = self.hailo.backend
-            self.runtime_stats.detector_active = True
-        except (HailoUnavailableError, ModelUnavailableError, FileNotFoundError) as exc:
-            self.runtime_stats.hailo_status = str(exc)
-            self.runtime_stats.detector_error = str(exc)
-            LOGGER.error("Processing pipeline cannot start: %s", exc)
-            self._emit_stats()
-            self.database.close()
-            return
+        if not self.config.model.detector_enabled:
+            self.runtime_stats.detector_active = False
+            self.runtime_stats.hailo_status = "paused"
+            self.runtime_stats.reid_status = "OSNet paused (YOLO disabled)"
+            LOGGER.info("YOLO detection paused by user; camera status stays available")
+        else:
+            try:
+                model_status = self.model.require_available()
+                self.runtime_stats.active_hef = str(model_status.path)
+                self.runtime_stats.active_hef_sha256 = model_status.sha256
+                self.runtime_stats.model_type = model_status.model_type
+                if self.config.model.reid_required:
+                    reid_status = self.reid.require_available(validate_hailo=True)
+                    self.runtime_stats.reid_status = reid_status.message
+                    self.runtime_stats.reid_hef_sha256 = reid_status.sha256
+                else:
+                    self.runtime_stats.reid_status = "OSNet ReID disabled by configuration"
+                    self.runtime_stats.reid_hef_sha256 = ""
+                self.hailo.initialize()
+                if self.config.model.reid_required:
+                    self.reid.initialize()
+                    self.runtime_stats.reid_status = self.reid.status_message
+                self.runtime_stats.hailo_status = self.hailo.status
+                self.runtime_stats.hailo_architecture = self.hailo.hailo_architecture
+                self.runtime_stats.hailo_device = self.hailo.hailo_device
+                self.runtime_stats.backend = self.hailo.backend
+                self.runtime_stats.detector_active = True
+            except (HailoUnavailableError, ModelUnavailableError, FileNotFoundError) as exc:
+                self.runtime_stats.hailo_status = str(exc)
+                self.runtime_stats.detector_error = str(exc)
+                LOGGER.error("Processing pipeline cannot start: %s", exc)
+                self._emit_stats()
+                self.database.close()
+                return
         frames = 0
         last_tick = monotonic()
         while not self.stop_event.is_set():
@@ -481,6 +489,8 @@ class ProcessingPipeline(Thread):
             self._restore_inside_only()
 
     def _detect(self, packet: FramePacket) -> list[Detection]:
+        if not self.config.model.detector_enabled:
+            return []
         if not self.hailo.ready:
             return []
         try:
