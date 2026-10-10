@@ -377,7 +377,9 @@ class CamerasPage(BasePage):
             combo: QComboBox = controls["source"]  # type: ignore[assignment]
             existing = self._source(combo)
             for camera in sources:
-                source = camera.url_template
+                # RTSP discovery defaults to native main-stream quality; the
+                # operator can still select the low-bandwidth substream manually.
+                source = reolink_rtsp_url(camera.host, port=camera.port, stream="main")
                 if not any(combo.itemData(i) == source for i in range(combo.count())):
                     combo.addItem(camera.label, source)
             self._select_source(combo, existing)
