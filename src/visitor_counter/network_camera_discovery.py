@@ -14,6 +14,7 @@ import socket
 import subprocess
 from time import monotonic
 from urllib.parse import quote
+from uuid import uuid4
 
 
 # Restrict discovery to RFC 1918 LAN addresses, not every special IPv4 range
@@ -141,7 +142,7 @@ def discover_onvif_hosts(*, timeout: float = 1.4) -> list[str]:
         '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" '
         'xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing" '
         'xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
-        '<e:Header><w:MessageID>uuid:34d65cae-9a14-4e2e-9871-6f163071a8cb</w:MessageID>'
+        f'<e:Header><w:MessageID>uuid:{uuid4()}</w:MessageID>'
         '<w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
         '<w:Action e:mustUnderstand="true">'
         'http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>'
