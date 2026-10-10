@@ -13,6 +13,8 @@
 ## Verified
 
 - Windows non-hardware suite: 201 passed, 6 skipped, 8 hardware tests deselected. Skips include platform-specific symlink behavior and unavailable optional assets.
+- Deployed Pi non-hardware suite: 206 passed, 1 skipped, 8 hardware tests deselected. Separate hardware presence suite: 8 passed; presence tests alone do not certify camera streams or counting.
+- Deployed source updated by fast-forward; counter and status API services both active, status file refreshing within one second, Hailo and OSNet initialized without a reported detector error. Configuration SHA-256 unchanged across deployment, local license key retained and SQLite backups made using the backup API.
 - Real Raspberry Pi 5 / Hailo-10H, firmware 5.1.1: patched detector run on the public Ultralytics bus test image, not a private camera frame.
 - Decoded public fixture: 810x1080; model input: UINT8 RGB, 1x640x640x3. Actual output includes HWC 80x80x80 classification tensor.
 - All three runs detected four people, confidences 0.7558–0.9351. Hailo execution 39.2–40.6 ms; total inference plus preprocessing/ONNX 51.9–61.5 ms. Boxes remained within native image bounds.
