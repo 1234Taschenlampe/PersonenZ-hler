@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..camera_manager import open_camera_source
+from ..privacy import anonymize_frame
 from .components import Card
 
 
@@ -50,10 +51,13 @@ class _PreviewReader(QThread):
     image_ready = Signal(str, QImage)
     failed = Signal(str, str)
 
-    def __init__(self, camera_id: str, source: str, parent: QWidget) -> None:
+    def __init__(
+        self, camera_id: str, source: str, parent: QWidget, *, pixel_size: int = 24
+    ) -> None:
         super().__init__(parent)
         self.camera_id = camera_id
         self.source = source
+        self.pixel_size = max(24, pixel_size)
         self._stop_requested = Event()
 
     def stop(self) -> None:
@@ -85,6 +89,12 @@ class _PreviewReader(QThread):
                     frame = cv2.resize(
                         frame, (target_width, target_height), interpolation=cv2.INTER_AREA
                     )
+                # Never deliver identifiable raw frames to the desktop.
+                # No tracked boxes are available in the independent preview reader,
+                # so person-only anonymization would be ineffective here.
+                frame = anonymize_frame(
+                    frame, mode="full_frame", pixel_size=self.pixel_size
+                )
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = QImage(
                     rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0],
@@ -170,6 +180,8 @@ class CameraPreviewPanel(QWidget):
         self.grid.setSpacing(12)
         outer.addLayout(self.grid)
         self._active = True
+        self._preview_enabled = False  # Explicit opt-in in Datenschutz.
+        self._pixel_size = 24
         self._readers: dict[str, _PreviewReader] = {}
         self._retiring: set[_PreviewReader] = set()
         self._tiles: dict[str, _PreviewTile] = {}
@@ -179,6 +191,19 @@ class CameraPreviewPanel(QWidget):
         self._dialog: QDialog | None = None
         self._dialog_camera: str | None = None
         self._dialog_label: QLabel | None = None
+
+    def set_preview_policy(self, *, enabled: bool, pixel_size: int = 24) -> None:
+        """Apply local privacy consent immediately without restarting the Pi."""
+        pixel_size = max(24, int(pixel_size))
+        if self._preview_enabled == enabled and self._pixel_size == pixel_size:
+            return
+        self._preview_enabled = enabled
+        self._pixel_size = pixel_size
+        self._stop_all()
+        self._last_images.clear()
+        for tile in self._tiles.values():
+            tile.clear_image()
+        self.update_cameras(self._latest_cameras, self._latest_sources)
 
     def set_active(self, active: bool) -> None:
         if self._active == active:
@@ -199,12 +224,21 @@ class CameraPreviewPanel(QWidget):
     ) -> None:
         self._latest_cameras = list(cameras)
         self._latest_sources = dict(sources)
-        desired = online_camera_sources(cameras, sources) if self._active else []
-        target = {camera_id: (name, source) for camera_id, name, source in desired}
-        self.summary.setText(
-            f"{len(desired)} von {len(cameras)} Kameras online"
-            if desired else f"Keine Live-Kamera online (0 von {len(cameras)})"
+        desired = (
+            online_camera_sources(cameras, sources)
+            if self._active and self._preview_enabled else []
         )
+        target = {camera_id: (name, source) for camera_id, name, source in desired}
+        if not self._preview_enabled:
+            self.summary.setText(
+                "Lokale Vorschau aus. Unter Datenschutz aktivieren; "
+                "Bilder werden vollständig verpixelt."
+            )
+        else:
+            self.summary.setText(
+                f"{len(desired)} von {len(cameras)} Kameras mit Live-Vorschau"
+                if desired else f"Keine Live-Kamera online (0 von {len(cameras)})"
+            )
         if self._dialog is not None and self._dialog_camera not in target:
             self._dialog.close()
         for camera_id in list(self._readers):
@@ -227,7 +261,9 @@ class CameraPreviewPanel(QWidget):
             if reader is None or not reader.isRunning():
                 if reader is not None:
                     self._stop_reader(camera_id)
-                reader = _PreviewReader(camera_id, source, self)
+                reader = _PreviewReader(
+                    camera_id, source, self, pixel_size=self._pixel_size
+                )
                 reader.image_ready.connect(
                     lambda cid, image, r=reader: (
                         self._on_image(cid, image) if self._readers.get(cid) is r else None
