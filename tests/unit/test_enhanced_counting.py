@@ -2,11 +2,44 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from cryptography.fernet import Fernet
 
 from visitor_counter.configuration import AppConfig
+from visitor_counter.application_service import ApplicationService
+from visitor_counter.configuration import save_config
 from visitor_counter.enhanced_counting import DailyUniqueStore
+from visitor_counter.runtime_paths import RuntimePaths
+
+
+def test_daily_unique_worker_thread_persists_and_closes(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VISITOR_COUNTER_DATA_KEY", Fernet.generate_key().decode("ascii"))
+    config = AppConfig()
+    config.database.path = "custom-data/person_counter.sqlite3"
+    store = DailyUniqueStore(tmp_path, config)
+    now = datetime.now().astimezone().timestamp()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(store.register, i, (1.0, 0.0), now) for i in range(20)]
+        assert sum(f.result() for f in futures) == 1
+        executor.submit(store.close).result()
+    assert store.path == tmp_path / "custom-data/daily_unique.sqlite3"
+    reopened = DailyUniqueStore(tmp_path, config)
+    assert reopened.count == 1
+    assert not reopened.register(30, (1.0, 0.0), now)
+    reopened.close()
+
+
+def test_dashboard_reads_daily_visitors_beside_configured_database(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VISITOR_COUNTER_DATA_KEY", Fernet.generate_key().decode("ascii"))
+    config = AppConfig()
+    config.database.path = str(tmp_path / "existing-data/person_counter.sqlite3")
+    paths = RuntimePaths.discover(tmp_path, environ={}, home=tmp_path)
+    save_config(config, paths.config_file)
+    store = DailyUniqueStore(tmp_path, config)
+    store.register(1, (1.0, 0.0), datetime.now().astimezone().timestamp())
+    store.close()
+    assert ApplicationService(paths)._daily_unique_count() == 1
 
 
 def test_daily_unique_counts_same_embedding_once_and_persists(tmp_path: Path, monkeypatch) -> None:

@@ -6,6 +6,7 @@ from threading import Event
 
 import cv2
 import pytest
+import numpy as np
 
 from visitor_counter import network_camera_discovery as discovery
 from visitor_counter import camera_manager
@@ -72,3 +73,23 @@ def test_invalid_camera_input_does_not_mark_online() -> None:
 def test_private_camera_network_predicate() -> None:
     assert discovery._is_lan(ipaddress.IPv4Address("192.168.55.9"))
     assert not discovery._is_lan(ipaddress.IPv4Address("8.8.8.8"))
+
+
+def test_decoded_stream_failure_reports_reconnect_attempt() -> None:
+    camera = CameraCapture(
+        CameraConfig(camera_id="camera_1"), LatestFrameHub(["camera_1"]), Event()
+    )
+
+    class Capture:
+        reads = 0
+
+        def read(self):
+            self.reads += 1
+            return (True, np.ones((10, 10, 3), dtype=np.uint8)) if self.reads == 1 else (False, None)
+
+    camera._capture_loop(Capture())
+    assert camera.stats.last_frame_time is not None
+    assert camera.stats.state == "RECONNECTING"
+    assert camera.stats.decode_errors == 1
+    assert camera.stats.reconnect_count == 1
+    assert not camera.stats.connected

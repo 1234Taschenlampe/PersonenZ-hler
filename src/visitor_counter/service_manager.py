@@ -101,6 +101,18 @@ class ServiceManager:
                 )
             command = ["pkexec", str(self.admin_helper), "service", action, self.unit]
         try:
+            if self.user_service and action in {"start", "restart"}:
+                # Only an explicit user action clears the automatic restart
+                # limit; crash loops remain bounded by the systemd unit.
+                reset = self.runner(
+                    self._systemctl("reset-failed", self.unit),
+                    check=False, capture_output=True, text=True, timeout=5,
+                )
+                if reset.returncode:
+                    raise ServiceActionError(
+                        (reset.stderr or reset.stdout).strip()
+                        or "Dienstfehler konnte nicht zurückgesetzt werden"
+                    )
             result = self.runner(
                 command, check=False, capture_output=True, text=True, timeout=30
             )

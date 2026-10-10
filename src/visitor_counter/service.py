@@ -134,6 +134,8 @@ class VisitorCounterService:
                     "dropped_frames": cs.dropped_frames,
                     "decode_errors": cs.decode_errors,
                     "last_error": redact_sensitive(cs.last_error),
+                    "obstructed": stats.camera_obstructed.get(camera.camera_id, False),
+                    "obstruction_reason": stats.camera_obstruction_reason.get(camera.camera_id, ""),
                     "visible": self.pipeline.counters[camera.camera_id].counts.visible,
                     "entered": self.pipeline.counters[camera.camera_id].counts.entered,
                     "exited": self.pipeline.counters[camera.camera_id].counts.exited,

@@ -177,6 +177,7 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.camera_obstructed[packet.camera_id] = (
                 obstruction.obstructed
             )
+            self.runtime_stats.camera_obstruction_reason[packet.camera_id] = obstruction.reason
             detect_start = monotonic()
             detections = [] if obstruction.obstructed else self._detect(packet)
             detections = self._filter_person_detections(

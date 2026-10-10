@@ -25,13 +25,17 @@ def ready(root: Path, config_file: Path) -> tuple[bool, str]:
         errors = validate_config(config)
         if errors:
             return False, "Konfiguration ungültig: " + errors[0]
-        if not all(camera.device for camera in config.cameras.values()):
+        if not any(camera.device for camera in config.cameras.values()):
             return False, "Kameraquellen noch nicht konfiguriert"
         paths = (
-            config.model.hef_path,
-            config.model.reid_hef_path if config.model.reid_required else None,
-            config.model.postprocess_onnx_path,
-            config.model.postprocess_config_path,
+            (
+                config.model.hef_path,
+                config.model.reid_hef_path if config.model.reid_required else None,
+                config.model.postprocess_onnx_path,
+                config.model.postprocess_config_path,
+            )
+            if config.model.detector_enabled
+            else ()
         )
         for name in paths:
             if not name:

@@ -144,3 +144,24 @@ def test_failed_preview_reader_uses_retry_delay() -> None:
     assert panel._retry_after["camera_1"] >= before + 8.0
     panel.shutdown()
     panel.close()
+
+
+def test_dashboard_uses_detector_active_for_hailo_readiness() -> None:
+    from visitor_counter.application_service import DashboardSnapshot
+    from visitor_counter.desktop.pages import OverviewPage
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    page = OverviewPage()
+    for active, expected in [(True, "Bereit"), (False, "Nicht bereit")]:
+        page.update_snapshot(DashboardSnapshot(
+            timestamp=0,
+            runtime={
+                "detector_enabled": True,
+                "detector_active": active,
+                "hailo_status": "YOLO26m - Hailo-Inferenz aktiv (HAILO10H)",
+            },
+        ))
+        assert page.health["KI-Beschleuniger"].text() == expected
+    page.preview_panel.shutdown()
+    page.close()

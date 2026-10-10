@@ -375,8 +375,12 @@ class MainWindow(QMainWindow):
 
         def probe() -> tuple[str, bool, str]:
             from ..camera_manager import open_camera_source
+            from ..rtsp_probe import probe_rtsp_source
 
-            capture = open_camera_source(source, timeout_ms=5000)
+            access = probe_rtsp_source(source) if source.lower().startswith("rtsp://") else None
+            if access is not None and not access.sdp_available:
+                return source, False, access.detail
+            capture = open_camera_source(source, timeout_ms=10000)
             try:
                 if not capture.isOpened():
                     return (

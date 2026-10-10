@@ -117,11 +117,12 @@ class OverviewPage(BasePage):
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
             card.set_value(snapshot.counts.get(key, 0))
-        runtime_ready = str(snapshot.runtime.get("hailo_status", "")).lower() in {
-            "ready",
-            "ok",
-            "bereit",
-        }
+        detector_active = snapshot.runtime.get("detector_active")
+        runtime_ready = detector_active is True or (
+            detector_active is None
+            and str(snapshot.runtime.get("hailo_status", "")).lower()
+            in {"ready", "ok", "bereit"}
+        )
         detector_paused = snapshot.runtime.get("detector_enabled") is False
         self.health["KI-Beschleuniger"].set_state(
             "warning" if detector_paused else ("ok" if runtime_ready else "error"),
@@ -158,6 +159,13 @@ class OverviewPage(BasePage):
             )
         else:
             self.inference_info.setText("Keine laufende KI-Verarbeitung.")
+        blocked = [str(item.get("name") or item.get("camera_id"))
+                   for item in snapshot.cameras if item.get("obstructed")]
+        if blocked and not detector_paused:
+            self.inference_info.setText(
+                self.inference_info.text() + " Bildprüfung blockiert die Zählung für: "
+                + ", ".join(blocked) + ". Verdeckung, Beleuchtung oder eingefrorenen Stream prüfen."
+            )
         self.health["Datenbank"].set_state(
             "ok" if snapshot.database.get("exists") else "warning",
             "Bereit" if snapshot.database.get("exists") else "Noch leer",

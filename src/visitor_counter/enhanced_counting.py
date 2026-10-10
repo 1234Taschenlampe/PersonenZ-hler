@@ -5,7 +5,9 @@ import logging
 import math
 import sqlite3
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
+from threading import RLock
 from time import time
 from typing import Any, Callable
 
@@ -15,6 +17,14 @@ from .inference_pipeline import ProcessingPipeline
 from .types import ConsensusDecision, CrossingEvent, Direction, TrackedObject
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _locked_store(method: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(method)
+    def locked(self: DailyUniqueStore, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return locked
 
 
 class DailyUniqueStore:
@@ -37,6 +47,7 @@ class DailyUniqueStore:
     ) -> None:
         self.project_root = project_root
         self.config = config
+        self._lock = RLock()
         self.threshold = float(
             config.identity.reid_threshold if threshold is None else threshold
         )
@@ -50,7 +61,7 @@ class DailyUniqueStore:
         data_dir = (
             configured_database.parent
             if configured_database.is_absolute()
-            else project_root / "data"
+            else (project_root / configured_database).parent
         )
         self.path = data_dir / "daily_unique.sqlite3"
         self._profiles: dict[int, tuple[float, ...]] = {}
@@ -68,6 +79,7 @@ class DailyUniqueStore:
         return datetime.fromtimestamp(timestamp).astimezone().date().isoformat()
 
     @property
+    @_locked_store
     def count(self) -> int:
         return len(self._profiles) + len(self._fallback_ids)
 
@@ -75,6 +87,7 @@ class DailyUniqueStore:
     def persistent(self) -> bool:
         return self._connection is not None and self.protector is not None
 
+    @_locked_store
     def ensure_day(self, timestamp: float | None = None) -> None:
         now = time() if timestamp is None else timestamp
         current = self._local_day(now)
@@ -92,6 +105,7 @@ class DailyUniqueStore:
             self._connection.commit()
             self._load_current_day()
 
+    @_locked_store
     def register(
         self,
         global_person_id: int,
@@ -133,6 +147,7 @@ class DailyUniqueStore:
         )
         return True
 
+    @_locked_store
     def reset(self) -> None:
         self._profiles.clear()
         self._fallback_ids.clear()
@@ -142,6 +157,7 @@ class DailyUniqueStore:
             self._connection.execute("DELETE FROM daily_unique_profiles")
             self._connection.commit()
 
+    @_locked_store
     def close(self) -> None:
         if self._connection is not None:
             self._connection.close()
@@ -153,7 +169,9 @@ class DailyUniqueStore:
             self.path.parent.chmod(0o700)
         except OSError:
             pass
-        self._connection = sqlite3.connect(self.path)
+        # Constructed by the service/GUI thread, used by inference and reset
+        # callbacks. The reentrant store lock serializes access across threads.
+        self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.execute("PRAGMA secure_delete=ON")
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute(

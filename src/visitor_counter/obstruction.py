@@ -19,6 +19,7 @@ class CameraObstructionDetector:
         self._previous_gray: np.ndarray | None = None
         self._stable_frames = 0
         self._latched = False
+        self._identical_frames = 0
 
     def update(self, image: np.ndarray) -> ObstructionResult:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
@@ -56,8 +57,14 @@ class CameraObstructionDetector:
     def _is_frozen(self, small_gray: np.ndarray) -> bool:
         if self._previous_gray is None:
             return False
-        diff = float(np.mean(cv2.absdiff(small_gray, self._previous_gray)))
-        return diff < 0.05
+        # Small compression/noise changes are valid live frames. A mean
+        # difference threshold suppressed real Reolink feeds in quiet scenes.
+        # Require repeated bit-identical frames, tolerating isolated duplicates.
+        self._identical_frames = (
+            self._identical_frames + 1
+            if np.array_equal(small_gray, self._previous_gray) else 0
+        )
+        return self._identical_frames >= 5
 
     def _is_abrupt_change(self, small_gray: np.ndarray) -> bool:
         if self._previous_gray is None:

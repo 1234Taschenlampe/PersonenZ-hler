@@ -9,6 +9,7 @@ from __future__ import annotations
 from threading import Event
 from time import monotonic
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import cv2
 from PySide6.QtCore import Qt, QThread, Signal
@@ -20,6 +21,20 @@ from PySide6.QtWidgets import (
 from ..camera_manager import open_camera_source
 from ..privacy import anonymize_frame
 from .components import Card
+
+PREVIEW_OPEN_TIMEOUT_MS = 10000
+
+
+def preview_camera_source(source: str) -> str:
+    """Keep full-quality inference while using Reolink's low-bandwidth preview."""
+    parts = urlsplit(source)
+    paths = {
+        "/h264Preview_01_main": "/h264Preview_01_sub",
+        "/Preview_01_main": "/Preview_01_sub",
+    }
+    if parts.scheme.lower() in {"rtsp", "rtsps"} and parts.path in paths:
+        return urlunsplit(parts._replace(path=paths[parts.path]))
+    return source
 
 
 def online_camera_sources(
@@ -66,7 +81,9 @@ class _PreviewReader(QThread):
     def run(self) -> None:
         capture = None
         try:
-            capture = open_camera_source(self.source, timeout_ms=3500)
+            capture = open_camera_source(
+                preview_camera_source(self.source), timeout_ms=PREVIEW_OPEN_TIMEOUT_MS
+            )
             if not capture.isOpened():
                 self.failed.emit(self.camera_id, "Vorschau nicht erreichbar")
                 return
@@ -232,8 +249,8 @@ class CameraPreviewPanel(QWidget):
         target = {camera_id: (name, source) for camera_id, name, source in desired}
         if not self._preview_enabled:
             self.summary.setText(
-                "Lokale Vorschau aus. Unter Datenschutz aktivieren; "
-                "Bilder werden vollständig verpixelt."
+                "Lokale Vorschau aus. Mit dem Schalter oben aktivieren; "
+                "Datenschutz: Bilder werden vollständig verpixelt."
             )
         else:
             self.summary.setText(
@@ -365,4 +382,4 @@ class CameraPreviewPanel(QWidget):
     def shutdown(self) -> None:
         self.set_active(False)
         for reader in list(self._retiring):
-            reader.wait(6500)
+            reader.wait(PREVIEW_OPEN_TIMEOUT_MS + 5000)
