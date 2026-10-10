@@ -116,3 +116,31 @@ def test_settings_expose_independent_yolo_and_reid_switches() -> None:
     assert emitted[0]["model.detector_enabled"] is False
     assert emitted[0]["model.reid_required"] is False
     page.close()
+
+
+def test_dashboard_switch_emits_local_preview_consent() -> None:
+    from visitor_counter.desktop.pages import OverviewPage
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    page = OverviewPage()
+    emitted = []
+    page.preview_opt_in_changed.connect(emitted.append)
+    assert not page.preview_toggle.isChecked()
+    page.preview_toggle.click()
+    assert emitted == [True]
+    page.preview_panel.shutdown()
+    page.close()
+
+
+def test_failed_preview_reader_uses_retry_delay() -> None:
+    from time import monotonic
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    panel = CameraPreviewPanel()
+    before = monotonic()
+    panel._on_failure("camera_1", "Netzwerk nicht erreichbar")
+    assert panel._retry_after["camera_1"] >= before + 8.0
+    panel.shutdown()
+    panel.close()
