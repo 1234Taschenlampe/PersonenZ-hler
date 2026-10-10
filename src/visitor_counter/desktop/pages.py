@@ -845,7 +845,7 @@ class PrivacyPage(BasePage):
         self.legal_basis.setText(config.privacy.legal_basis)
         self.notice.setChecked(config.privacy.privacy_notice_acknowledged)
         self.preview.setChecked(config.display.show_camera_preview)
-         self.remote_video.setChecked(config.privacy.video_stream_enabled)
+        self.remote_video.setChecked(config.privacy.video_stream_enabled)
         self.store_events.setChecked(config.database.store_events)
         self.retention.setValue(config.database.retention_hours)
 
