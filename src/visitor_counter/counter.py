@@ -34,6 +34,11 @@ class _TrackMemory:
     observed_frames: int = 0
     zone_revision: int = 0
     counted_zone_revision: int = -1
+    # Recent center points in the configured reference coordinate system.
+    # Edge exits are classified by observed travel, not a synthetic midline.
+    observed_positions: list[tuple[float, float]] = field(default_factory=list)
+    exit_edge_side: str | None = None
+    edge_exit_checked: bool = False
 
 
 class LineCrossingCounter:
@@ -159,18 +164,49 @@ class LineCrossingCounter:
                 )
 
             memory.previous_center = anchor
+            memory.observed_positions.append(point)
+            memory.observed_positions = memory.observed_positions[-24:]
             memory.last_seen_frame = frame_id
             memory.observed_frames += 1
             if track.confirmed:
                 memory.last_confirmed_track = track
-            margin = min(
-                self.camera_config.edge_margin_pixels,
-                max(1, min(frame_width, frame_height) // 3),
+            margin = max(
+                8.0,
+                self.camera_config.edge_margin_pixels * min(
+                    frame_width / max(1, self.camera_config.width),
+                    frame_height / max(1, self.camera_config.height),
+                ),
             )
-            memory.last_near_edge = (
-                anchor[0] <= margin or anchor[0] >= frame_width - margin
-                or anchor[1] <= margin or anchor[1] >= frame_height - margin
-            )
+            edge_contact = max(8.0, margin * 0.12)
+            # Only boundaries perpendicular to the selected travel axis
+            # can generate events (top/bottom for a horizontal reference line).
+            # Require actual box contact, and a center close to that edge.
+            # An arbitrary side-edge occlusion must not be counted as passage.
+            nx, ny = self.normal_vector
+            if abs(ny) >= abs(nx):
+                edge_side = (
+                    "B" if ny > 0 else "A"
+                ) if (
+                    anchor[1] >= frame_height - margin - track.bbox.height / 2
+                    and track.bbox.y2 >= frame_height - edge_contact
+                ) else (
+                    ("A" if ny > 0 else "B")
+                    if (anchor[1] <= margin + track.bbox.height / 2
+                        and track.bbox.y1 <= edge_contact) else None
+                )
+            else:
+                edge_side = (
+                    "B" if nx > 0 else "A"
+                ) if (
+                    anchor[0] >= frame_width - margin - track.bbox.width / 2
+                    and track.bbox.x2 >= frame_width - edge_contact
+                ) else (
+                    ("A" if nx > 0 else "B")
+                    if (anchor[0] <= margin + track.bbox.width / 2
+                        and track.bbox.x1 <= edge_contact) else None
+                )
+            memory.exit_edge_side = edge_side
+            memory.last_near_edge = edge_side is not None
 
             # Update raw zone history
             memory.raw_zone_history.append(raw_zone)
@@ -226,57 +262,84 @@ class LineCrossingCounter:
                 and track_id not in visible_ids
                 and missing_frames >= self.camera_config.disappearance_frames
                 and not memory.counted
+                and not memory.edge_exit_checked
                 and memory.last_near_edge
                 and memory.last_confirmed_track is not None
             ):
-                events.extend(
-                    self._process_transition(
-                        memory.last_confirmed_track, memory, frame_id,
-                        on_disappearance=True,
+                memory.edge_exit_checked = True
+                transition = self._edge_exit_transition(memory)
+                if transition:
+                    events.extend(
+                        self._process_transition(
+                            memory.last_confirmed_track, memory, frame_id,
+                            on_disappearance=True, forced_transition=transition,
+                        )
                     )
-                )
+                else:
+                    self._reject("edge_exit_without_confirmed_travel")
             if missing_frames > self.tracking_config.maximum_track_age:
                 del self._tracks[track_id]
 
         return events
 
+    def _edge_exit_transition(self, memory: _TrackMemory) -> str | None:
+        """Infer departure direction using measured motion toward a real edge.
+
+        Do not infer entry/exit merely from vanishing in the image.
+        A confirmed person must approach the matching directional boundary
+        over multiple observed frames. Only one event may be emitted per track.
+        """
+        points = memory.observed_positions
+        if len(points) < max(3, self.tracking_config.min_confirmed_track_hits):
+            return None
+        if memory.exit_edge_side not in {"A", "B"}:
+            return None
+        nx, ny = self.normal_vector
+        projections = [x * nx + y * ny for x, y in points]
+        # The first and last positions are compared over a bounded window.
+        movement = projections[-1] - projections[0]
+        reference_axis = (
+            self.camera_config.height if abs(ny) >= abs(nx)
+            else self.camera_config.width
+        )
+        minimum_travel = max(25.0, reference_axis * 0.06)
+        if abs(movement) < minimum_travel:
+            return None
+        # A short reverse move at the boundary invalidates the departure.
+        tail = projections[-min(4, len(projections)):]
+        recent_travel = tail[-1] - tail[0]
+        if recent_travel * movement < -max(8.0, minimum_travel * 0.25):
+            return None
+        destination = "B" if movement > 0 else "A"
+        if destination != memory.exit_edge_side:
+            return None
+        return "A_to_B" if destination == "B" else "B_to_A"
+
     def _process_transition(
         self, track: TrackedObject, memory: _TrackMemory, frame_id: int,
-        *, on_disappearance: bool = False,
+        *, on_disappearance: bool = False, forced_transition: str | None = None,
     ) -> list[CrossingEvent]:
-        # We need at least two stable zones to see a transition
-        if len(memory.stable_zone_history) < 2:
-            return []
+        if forced_transition is None:
+            # Line mode still requires an actual stable zone transition.
+            if len(memory.stable_zone_history) < 2:
+                return []
+            current_stable = memory.stable_zone
+            if current_stable == "neutral":
+                return []
+            prev_non_neutral = next(
+                (z for z in reversed(memory.stable_zone_history[:-1])
+                 if z in ("A", "B")), None
+            )
+            if not prev_non_neutral or prev_non_neutral == current_stable:
+                return []
+            transition = f"{prev_non_neutral}_to_{current_stable}"
+        else:
+            transition = forced_transition
 
-        # Find the last non-neutral stable zone before current
-        current_stable = memory.stable_zone
-        if current_stable == "neutral":
+        if memory.counted_zone_revision == memory.zone_revision and forced_transition is None:
             return []
-
-        prev_non_neutral = None
-        for z in reversed(memory.stable_zone_history[:-1]):
-            if z in ("A", "B"):
-                prev_non_neutral = z
-                break
-
-        if not prev_non_neutral or prev_non_neutral == current_stable:
+        if on_disappearance and (memory.counted or not memory.last_near_edge):
             return []
-        if on_disappearance and (
-            memory.initial_side != prev_non_neutral
-            or not memory.last_near_edge
-        ):
-            return []
-
-        # Already handled transitions are normal steady-state observations,
-        # not rejected passages. Avoid logging them at camera frame rate.
-        if (
-            memory.counted_zone_revision == memory.zone_revision
-            or (on_disappearance and memory.counted)
-        ):
-            return []
-
-        # We have a transition! Either A -> B or B -> A
-        transition = f"{prev_non_neutral}_to_{current_stable}"
 
         # Determine direction
         direction = Direction.UNKNOWN

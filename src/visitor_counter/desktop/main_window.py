@@ -159,11 +159,7 @@ class MainWindow(QMainWindow):
 
     def _connect_pages(self) -> None:
         overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
-        overview.preview_opt_in_changed.connect(
-            lambda enabled: self._save_values({
-                "display.show_camera_preview": bool(enabled),
-            })
-        )
+        overview.preview_opt_in_changed.connect(self._set_local_preview)
         cameras: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
         cameras.discover_requested.connect(self._discover_cameras)
         cameras.network_scan_requested.connect(self._scan_network_cameras)
@@ -185,6 +181,17 @@ class MainWindow(QMainWindow):
         settings: SettingsPage = self.pages["Einstellungen"]  # type: ignore[assignment]
         settings.save_requested.connect(self._save_values)
         settings.security_asset_import_requested.connect(self._import_security_asset)
+
+    def _set_local_preview(self, enabled: bool) -> None:
+        # Locally displayed camera frames do not need pixelation. Preserve
+        # mandatory anonymization if the separate remote-video API is enabled.
+        config = self.settings_service.load()
+        self._save_values({
+            "display.show_camera_preview": bool(enabled),
+            "display.anonymization_mode": (
+                "full_frame" if config.privacy.video_stream_enabled else "none"
+            ),
+        })
 
     def _select_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)

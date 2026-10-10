@@ -20,7 +20,8 @@ def test_hd_line_overlay_matches_actual_inference_frame() -> None:
     pipeline = object.__new__(ProcessingPipeline)
     pipeline.config = AppConfig()
     pipeline.config.display.show_camera_preview = True
-    pipeline.config.display.anonymization_mode = "full_frame"
+    pipeline.config.display.anonymization_mode = "none"
+    pipeline.config.cameras["camera_1"].counting_mode = "line"
     pipeline.counters = {"camera_1": SimpleNamespace(_tracks={})}
     source = np.full((1080, 1920, 3), 140, dtype=np.uint8)
     packet = FramePacket.from_image("camera_1", 1, source, 1.0)
@@ -55,20 +56,20 @@ def test_preanonymized_local_preview_does_not_pixelate_boxes_again(
     exporter.close()
 
 
-def test_local_privacy_mode_can_show_scene_without_unmasking_people() -> None:
+def test_local_preview_setting_is_raw_while_remote_setting_stays_anonymized() -> None:
     app = QApplication.instance() or QApplication([])
     assert app is not None
     page = PrivacyPage()
     config = AppConfig()
     config.display.show_camera_preview = True
     page.set_config(config)
-    assert page.preview_anonymization.currentData() == "full_frame"
-    page.preview_anonymization.setCurrentIndex(
-        page.preview_anonymization.findData("persons")
-    )
+    assert config.display.anonymization_mode == "none"
     emitted = []
     page.save_requested.connect(emitted.append)
     page._emit_save()
-    assert emitted[0]["display.anonymization_mode"] == "persons"
+    assert emitted[0]["display.anonymization_mode"] == "none"
     assert emitted[0]["display.show_camera_preview"] is True
+    page.remote_video.setChecked(True)
+    page._emit_save()
+    assert emitted[-1]["display.anonymization_mode"] == "full_frame"
     page.close()

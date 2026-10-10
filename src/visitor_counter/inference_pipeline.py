@@ -578,12 +578,13 @@ class ProcessingPipeline(Thread):
                 return hidden_preview(image)
             # Obscure sensitive image content BEFORE painting annotations.
             # Otherwise full-frame pixelation destroys the visible AI overlay.
-            image = anonymize_frame(
-                image,
-                mode=self.config.display.anonymization_mode,
-                pixel_size=self.config.display.pixel_size,
-                tracks=tracks,
-            )
+            if self.config.display.anonymization_mode != "none":
+                image = anonymize_frame(
+                    image,
+                    mode=self.config.display.anonymization_mode,
+                    pixel_size=self.config.display.pixel_size,
+                    tracks=tracks,
+                )
         camera_config = self.config.cameras[packet.camera_id]
         sx = packet.width / max(1, camera_config.width)
         sy = packet.height / max(1, camera_config.height)
@@ -591,10 +592,9 @@ class ProcessingPipeline(Thread):
                         round(camera_config.line_start[1] * sy))
         scaled_end = (round(camera_config.line_end[0] * sx),
                       round(camera_config.line_end[1] * sy))
-        role_text = "EINGANG" if camera_config.role == "entrance" else "AUSGANG"
-        event_text = (
-            "EINTRITT +1" if camera_config.role == "entrance" else "AUSTRITT -1"
-        )
+        role_text = f"KAMERA {packet.camera_id[-1]}"
+        counts = self.counters[packet.camera_id].counts
+        event_text = f"IN: {counts.entered}  OUT: {counts.exited}"
         cv2.rectangle(image, (0, 0), (330, 78), (0, 0, 0), -1)
         cv2.putText(
             image,
@@ -616,32 +616,55 @@ class ProcessingPipeline(Thread):
             2,
             cv2.LINE_AA,
         )
-        cv2.line(
-            image, scaled_start, scaled_end, (0, 220, 255), 3
-        )
-
-        # Draw Zone A and Zone B boundary lines based on normal vector and hysteresis
-        ax, ay = scaled_start
-        bx, by = scaled_end
-        line_length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
-        if line_length > 0:
-            nx = -(by - ay) / line_length
-            ny = (bx - ax) / line_length
-            d = self.config.tracking.zone_hysteresis_pixels * min(sx, sy)
-
-            # Boundary A (distance < -d)
-            ax_a = int(ax + nx * (-d))
-            ay_a = int(ay + ny * (-d))
-            bx_a = int(bx + nx * (-d))
-            by_a = int(by + ny * (-d))
-            cv2.line(image, (ax_a, ay_a), (bx_a, by_a), (0, 0, 255), 1, cv2.LINE_AA)
-
-            # Boundary B (distance > d)
-            ax_b = int(ax + nx * d)
-            ay_b = int(ay + ny * d)
-            bx_b = int(bx + nx * d)
-            by_b = int(by + ny * d)
-            cv2.line(image, (ax_b, ay_b), (bx_b, by_b), (0, 255, 0), 1, cv2.LINE_AA)
+        if camera_config.counting_mode == "exit_edge":
+            # Two actual image boundaries, not an imaginary center line.
+            # The configured line vector defines the A/B travel axis only.
+            nx, ny = self.counters[packet.camera_id].normal_vector
+            margin = round(camera_config.edge_margin_pixels * min(sx, sy))
+            margin = max(3, margin)
+            if abs(ny) >= abs(nx):
+                edges = [
+                    ((0, margin), (packet.width - 1, margin),
+                     "A" if ny > 0 else "B"),
+                    ((0, packet.height - margin - 1),
+                     (packet.width - 1, packet.height - margin - 1),
+                     "B" if ny > 0 else "A"),
+                ]
+            else:
+                edges = [
+                    ((margin, 0), (margin, packet.height - 1),
+                     "B" if nx > 0 else "A"),
+                    ((packet.width - margin - 1, 0),
+                     (packet.width - margin - 1, packet.height - 1),
+                     "A" if nx > 0 else "B"),
+                ]
+            for first, second, side in edges:
+                transition = "A_to_B" if side == "B" else "B_to_A"
+                marker = "+1 IN" if transition == camera_config.entry_direction else "-1 OUT"
+                color = (0, 230, 100) if marker.startswith("+") else (0, 160, 255)
+                cv2.line(image, first, second, color, 3, cv2.LINE_AA)
+                label_x = min(packet.width - 120, max(10, first[0] + 10))
+                label_y = min(packet.height - 10, max(100, first[1] + 25))
+                cv2.putText(image, marker, (label_x, label_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+        else:
+            cv2.line(image, scaled_start, scaled_end, (0, 220, 255), 3)
+            # The legacy mode displays the middle line and hysteresis bounds.
+            ax, ay = scaled_start
+            bx, by = scaled_end
+            line_length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+            if line_length > 0:
+                nx = -(by - ay) / line_length
+                ny = (bx - ax) / line_length
+                d = self.config.tracking.zone_hysteresis_pixels * min(sx, sy)
+                cv2.line(image,
+                         (int(ax - nx * d), int(ay - ny * d)),
+                         (int(bx - nx * d), int(by - ny * d)),
+                         (0, 0, 255), 1, cv2.LINE_AA)
+                cv2.line(image,
+                         (int(ax + nx * d), int(ay + ny * d)),
+                         (int(bx + nx * d), int(by + ny * d)),
+                         (0, 255, 0), 1, cv2.LINE_AA)
 
         for track in tracks:
             box = track.bbox

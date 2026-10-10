@@ -27,8 +27,8 @@ class CameraConfig:
     masks: list[list[tuple[int, int]]] = field(default_factory=list)
     entry_direction: str = "A_to_B"  # "A_to_B", "B_to_A", or "none"
     exit_direction: str = "B_to_A"   # opposite of entry_direction
-    counting_mode: str = "line"  # line: immediate stable crossing; exit_edge: after disappearance near frame edge
-    disappearance_frames: int = 6
+    counting_mode: str = "exit_edge"  # count after confirmed outward movement and disappearance at image boundary
+    disappearance_frames: int = 4
     edge_margin_pixels: int = 90
 
 
@@ -129,7 +129,7 @@ class DisplayConfig:
     display_raw_frames_only: bool = False
     raw_frame_overlay: bool = True
     show_camera_preview: bool = False
-    anonymization_mode: str = "full_frame"
+    anonymization_mode: str = "none"  # local RAM-only preview; remote streams remain anonymized
     pixel_size: int = 24
 
 
@@ -329,8 +329,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Stored events require an encryption key environment variable or key file.")
     if config.display.anonymization_mode not in {"full_frame", "persons", "none"}:
         errors.append("Display anonymization_mode must be full_frame, persons, or none.")
-    if config.privacy.enabled and config.display.show_camera_preview and config.display.anonymization_mode == "none":
-        errors.append("Privacy mode forbids an unmasked camera preview.")
+    # Local raw previews are RAM-only and explicitly opted in. The exporter
+    # enforces /dev/shm for this mode; remote video must remain anonymized.
     if config.privacy.video_stream_enabled and config.display.anonymization_mode != "full_frame":
         errors.append("Remote video requires full-frame anonymization because license plates are not detected.")
     if not config.privacy.local_processing_only:
