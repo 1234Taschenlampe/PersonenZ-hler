@@ -162,7 +162,6 @@ class MainWindow(QMainWindow):
         overview.preview_opt_in_changed.connect(
             lambda enabled: self._save_values({
                 "display.show_camera_preview": bool(enabled),
-                "display.anonymization_mode": "full_frame",
             })
         )
         cameras: CamerasPage = self.pages["Kameras"]  # type: ignore[assignment]
@@ -266,6 +265,8 @@ class MainWindow(QMainWindow):
         runtime_fields = {
             "model.detector_enabled", "model.reid_required",
             "model.confidence_threshold", "identity.reid_threshold",
+            "display.show_camera_preview", "display.anonymization_mode",
+            "display.pixel_size",
             "timeout.presence_timeout_minutes", "privacy.video_stream_enabled",
             "database.store_events", "database.retention_hours",
         }

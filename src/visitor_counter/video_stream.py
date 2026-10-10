@@ -34,8 +34,10 @@ class FrameStreamExporter:
         target_fps: float = 5.0,
         _output_dir: Path | None = None,
         _allow_raw: bool = False,
+        _frames_preanonymized: bool = False,
     ) -> None:
         self.enabled = enabled
+        self._frames_preanonymized = _frames_preanonymized
         self.output_dir = _output_dir or stream_frame_directory(project_root)
         self.anonymization_mode = anonymization_mode
         self.pixel_size = pixel_size
@@ -98,12 +100,16 @@ class FrameStreamExporter:
 
     def _write_frame(self, camera_id: str, frame: np.ndarray, tracks: Iterable[object]) -> None:
         native_height, native_width = frame.shape[:2]
-        frame = anonymize_frame(
-            frame,
-            mode=self.anonymization_mode,
-            pixel_size=self.pixel_size,
-            tracks=tracks,
-        )
+        # The local pipeline already anonymizes before drawing readable
+        # boxes/lines. Pixelating again makes the preview appear low-res.
+        # Remote exporters always sanitize the raw image themselves.
+        if not (self.enabled and self._frames_preanonymized):
+            frame = anonymize_frame(
+                frame,
+                mode=self.anonymization_mode,
+                pixel_size=self.pixel_size,
+                tracks=tracks,
+            )
         frame = self._resize(frame)
         ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality])
         if not ok:
@@ -176,10 +182,11 @@ def local_preview_directory(project_root: Path) -> Path:
 
 
 class LocalPreviewExporter(FrameStreamExporter):
-    """Share native frames from the existing capture, never open another RTSP feed.
+    """Export pre-anonymized processed camera frames to RAM, without RTSP duplication.
 
-    Raw local preview is restricted to Linux RAM storage. The remote stream's
-    anonymization requirement and opt-in remain independent of this channel.
+    The AI input remains native-resolution; only the GUI preview is bounded
+    to HD to avoid excessive JPEG/Qt CPU and memory costs on Raspberry Pi.
+    The remote stream still applies its own mandatory anonymization.
     """
 
     def __init__(
@@ -192,7 +199,7 @@ class LocalPreviewExporter(FrameStreamExporter):
             raise ValueError("Raw desktop preview requires RAM-backed /dev/shm storage.")
         super().__init__(
             project_root, enabled=enabled, anonymization_mode=anonymization_mode,
-            pixel_size=pixel_size, max_width=0, max_height=0,
-            jpeg_quality=90, target_fps=target_fps, remove_on_shutdown=True,
-            _output_dir=output_dir, _allow_raw=True,
+            pixel_size=pixel_size, max_width=1920, max_height=1080,
+            jpeg_quality=88, target_fps=target_fps, remove_on_shutdown=True,
+            _output_dir=output_dir, _allow_raw=True, _frames_preanonymized=True,
         )

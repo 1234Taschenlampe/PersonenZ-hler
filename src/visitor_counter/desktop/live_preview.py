@@ -216,6 +216,8 @@ class CameraPreviewPanel(QWidget):
         self._dialog: QDialog | None = None
         self._dialog_camera: str | None = None
         self._dialog_label: QLabel | None = None
+        self._dialog_scroll: QScrollArea | None = None
+        self._dialog_fit = True
 
     def set_preview_policy(self, *, enabled: bool, pixel_size: int = 24) -> None:
         """Apply local privacy consent immediately without restarting the Pi."""
@@ -356,8 +358,13 @@ class CameraPreviewPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidget(label)
         scroll.setWidgetResizable(False)
-        layout.addWidget(QLabel("Native Auflösung (1:1) · Bild mit den Scrollleisten verschieben"))
+        zoom = QPushButton("Originalgröße (1:1) anzeigen")
+        zoom.setCheckable(True)
+        zoom.toggled.connect(self._set_original_zoom)
+        layout.addWidget(zoom)
         layout.addWidget(scroll)
+        self._dialog_scroll = scroll
+        self._dialog_fit = True
         self._dialog = dialog
         self._dialog_camera = camera_id
         self._dialog_label = label
@@ -366,17 +373,33 @@ class CameraPreviewPanel(QWidget):
             self._show_dialog_image(self._last_images[camera_id])
         dialog.open()
 
+    def _set_original_zoom(self, original: bool) -> None:
+        self._dialog_fit = not original
+        if self._dialog_camera in self._last_images:
+            self._show_dialog_image(self._last_images[self._dialog_camera])
+
     def _show_dialog_image(self, image: QImage) -> None:
         label = self._dialog_label
-        if label is not None:
-            label.setPixmap(QPixmap.fromImage(image))
-            label.resize(image.width(), image.height())
+        scroll = self._dialog_scroll
+        if label is None or scroll is None:
+            return
+        pixmap = QPixmap.fromImage(image)
+        if self._dialog_fit:
+            pixmap = pixmap.scaled(
+                max(1, scroll.viewport().width() - 4),
+                max(1, scroll.viewport().height() - 4),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        label.setPixmap(pixmap)
+        label.resize(pixmap.size())
 
     def _clear_dialog(self, dialog: QDialog) -> None:
         if self._dialog is dialog:
             self._dialog = None
             self._dialog_camera = None
             self._dialog_label = None
+            self._dialog_scroll = None
         dialog.deleteLater()
 
     def _stop_reader(self, camera_id: str) -> None:

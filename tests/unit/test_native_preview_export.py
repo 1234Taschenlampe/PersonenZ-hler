@@ -19,17 +19,17 @@ def isolated_preview_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("visitor_counter.video_stream.stream_frame_directory", lambda root: tmp_path / "remote")
 
 
-def test_local_preview_exports_native_decoded_size(tmp_path: Path) -> None:
+def test_local_preview_preserves_field_of_view_at_hd_size(tmp_path: Path) -> None:
     exporter = LocalPreviewExporter(tmp_path, enabled=False)
     exporter.output_dir = tmp_path / "preview"
     exporter.output_dir.mkdir()
     frame = np.zeros((1920, 2560, 3), dtype=np.uint8)
     exporter._write_frame("camera_1", frame, ())
     decoded = cv2.imread(str(exporter.output_dir / "camera_1.jpg"))
-    assert decoded.shape[:2] == (1920, 2560)
+    assert decoded.shape[:2] == (1080, 1440)
     metadata = json.loads((exporter.output_dir / "camera_1.json").read_text())
-    assert metadata["native_width"] == metadata["width"] == 2560
-    assert metadata["native_height"] == metadata["height"] == 1920
+    assert (metadata["native_width"], metadata["native_height"]) == (2560, 1920)
+    assert (metadata["width"], metadata["height"]) == (1440, 1080)
     assert metadata["anonymized"] is True
     exporter.close()
     assert not exporter.output_dir.exists()

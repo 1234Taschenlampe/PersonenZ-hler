@@ -14,6 +14,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton
 
 from visitor_counter.application_service import DashboardSnapshot
 from visitor_counter.desktop.live_preview import CameraPreviewPanel, _PreviewReader, _PreviewTile, online_camera_sources, preview_camera_source
@@ -106,6 +107,8 @@ def test_expanded_preview_preserves_native_image_pixels() -> None:
     panel._last_images["camera_1"] = image
     panel._expand("camera_1")
     app.processEvents()
+    assert panel._dialog_label.pixmap().width() < image.width()
+    panel._dialog.findChild(QPushButton).click()
     assert panel._dialog_label.pixmap().size() == image.size()
     assert panel._dialog_label.size() == image.size()
     panel._dialog.close()

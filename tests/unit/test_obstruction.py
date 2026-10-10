@@ -32,12 +32,12 @@ def test_quiet_live_scene_is_not_a_frozen_stream() -> None:
         assert not detector.update(frame).obstructed
 
 
-def test_repeated_identical_frames_still_detect_frozen_stream() -> None:
+def test_repeated_identical_frames_do_not_disable_detection_in_static_scene() -> None:
     detector = CameraObstructionDetector()
     image = np.random.default_rng(42).integers(40, 200, (36, 64), dtype=np.uint8)
     assert not detector.update(image).obstructed
     assert not detector.update(image).obstructed
     for _ in range(5):
         result = detector.update(image)
-    assert result.obstructed
-    assert result.reason == "frozen frame"
+    assert not result.obstructed
+    assert result.reason == "clear"

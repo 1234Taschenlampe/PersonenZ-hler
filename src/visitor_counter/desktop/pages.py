@@ -102,8 +102,8 @@ class OverviewPage(BasePage):
             "Anonymisierte Livebilder auf der Startseite anzeigen"
         )
         self.preview_toggle.setToolTip(
-            "Aktiviert die lokale Vorschau. Bilder werden vor der Anzeige "
-            "vollständig verpixelt; es werden keine Bilder gespeichert."
+            "Aktiviert lokale, flüchtige KI-Vorschaubilder. Die Art der "
+            "Anonymisierung wird unter Datenschutz gewählt; kein RTSP-Zweitstream."
         )
         self.preview_toggle.clicked.connect(
             lambda checked=False: self.preview_opt_in_changed.emit(bool(checked))
@@ -788,6 +788,14 @@ class PrivacyPage(BasePage):
         self.legal_basis = QLineEdit()
         self.notice = QCheckBox("Datenschutzhinweis ist sichtbar angebracht")
         self.preview = QCheckBox("Lokale anonymisierte Vorschau aktivieren")
+        self.preview_anonymization = QComboBox()
+        self.preview_anonymization.addItem("Gesamtes Bild verpixeln (maximaler Schutz)", "full_frame")
+        self.preview_anonymization.addItem("Personen verpixeln, Umgebung scharf", "persons")
+        self.preview_anonymization.setToolTip(
+            "Nur für lokale Vorführungen: Der Personenmodus schützt erkannte "
+            "Personen, aber andere identifizierende Bildbereiche können sichtbar "
+            "bleiben. Remote-Livebild erfordert weiterhin Vollbild-Verpixelung."
+        )
         self.remote_video = QCheckBox("Remote-Livebild explizit aktivieren")
         self.store_events = QCheckBox("Granulare Ereignisse verschlüsselt speichern")
         self.retention = QSpinBox()
@@ -799,6 +807,7 @@ class PrivacyPage(BasePage):
         form.addRow("Geprüfte Rechtsgrundlage", self.legal_basis)
         form.addRow("", self.notice)
         form.addRow("", self.preview)
+        form.addRow("Darstellung der Livebilder", self.preview_anonymization)
         form.addRow("", self.remote_video)
         form.addRow("", self.store_events)
         form.addRow("Aufbewahrung", self.retention)
@@ -840,6 +849,8 @@ class PrivacyPage(BasePage):
         self.legal_basis.setText(config.privacy.legal_basis)
         self.notice.setChecked(config.privacy.privacy_notice_acknowledged)
         self.preview.setChecked(config.display.show_camera_preview)
+        mode_index = self.preview_anonymization.findData(config.display.anonymization_mode)
+        self.preview_anonymization.setCurrentIndex(max(0, mode_index))
         self.remote_video.setChecked(config.privacy.video_stream_enabled)
         self.store_events.setChecked(config.database.store_events)
         self.retention.setValue(config.database.retention_hours)
@@ -865,7 +876,7 @@ class PrivacyPage(BasePage):
                 if self.notice.isChecked()
                 else "",
                 "display.show_camera_preview": self.preview.isChecked(),
-                "display.anonymization_mode": "full_frame",
+                "display.anonymization_mode": str(self.preview_anonymization.currentData()),
                 "privacy.video_stream_enabled": self.remote_video.isChecked(),
                 "database.store_events": self.store_events.isChecked(),
                 "database.retention_hours": self.retention.value(),

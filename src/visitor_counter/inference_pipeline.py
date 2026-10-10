@@ -572,7 +572,25 @@ class ProcessingPipeline(Thread):
 
     def _annotate(self, packet: FramePacket, tracks: list[TrackedObject]) -> object:
         image = packet.image.copy()
+        if self.config.privacy.enabled:
+            if (not self.config.display.show_camera_preview
+                    and not self.config.privacy.video_stream_enabled):
+                return hidden_preview(image)
+            # Obscure sensitive image content BEFORE painting annotations.
+            # Otherwise full-frame pixelation destroys the visible AI overlay.
+            image = anonymize_frame(
+                image,
+                mode=self.config.display.anonymization_mode,
+                pixel_size=self.config.display.pixel_size,
+                tracks=tracks,
+            )
         camera_config = self.config.cameras[packet.camera_id]
+        sx = packet.width / max(1, camera_config.width)
+        sy = packet.height / max(1, camera_config.height)
+        scaled_start = (round(camera_config.line_start[0] * sx),
+                        round(camera_config.line_start[1] * sy))
+        scaled_end = (round(camera_config.line_end[0] * sx),
+                      round(camera_config.line_end[1] * sy))
         role_text = "EINGANG" if camera_config.role == "entrance" else "AUSGANG"
         event_text = (
             "EINTRITT +1" if camera_config.role == "entrance" else "AUSTRITT -1"
@@ -599,17 +617,17 @@ class ProcessingPipeline(Thread):
             cv2.LINE_AA,
         )
         cv2.line(
-            image, camera_config.line_start, camera_config.line_end, (0, 220, 255), 2
+            image, scaled_start, scaled_end, (0, 220, 255), 3
         )
 
         # Draw Zone A and Zone B boundary lines based on normal vector and hysteresis
-        ax, ay = camera_config.line_start
-        bx, by = camera_config.line_end
+        ax, ay = scaled_start
+        bx, by = scaled_end
         line_length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
         if line_length > 0:
             nx = -(by - ay) / line_length
             ny = (bx - ax) / line_length
-            d = self.config.tracking.zone_hysteresis_pixels
+            d = self.config.tracking.zone_hysteresis_pixels * min(sx, sy)
 
             # Boundary A (distance < -d)
             ax_a = int(ax + nx * (-d))
@@ -651,18 +669,6 @@ class ProcessingPipeline(Thread):
                 (0, 255, 120),
                 2,
                 cv2.LINE_AA,
-            )
-        if self.config.privacy.enabled:
-            if (
-                not self.config.display.show_camera_preview
-                and not self.config.privacy.video_stream_enabled
-            ):
-                return hidden_preview(image)
-            return anonymize_frame(
-                image,
-                mode=self.config.display.anonymization_mode,
-                pixel_size=self.config.display.pixel_size,
-                tracks=tracks,
             )
         return image
 

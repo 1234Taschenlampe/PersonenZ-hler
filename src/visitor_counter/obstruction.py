@@ -27,7 +27,7 @@ class CameraObstructionDetector:
         brightness = float(np.mean(small))
         contrast = float(np.std(small))
         structure = float(cv2.Laplacian(small, cv2.CV_64F).var())
-        frozen = self._is_frozen(small)
+        self._is_frozen(small)
         abrupt = self._is_abrupt_change(small)
         self._previous_gray = small.copy()
 
@@ -38,8 +38,9 @@ class CameraObstructionDetector:
             reason = "extreme brightness"
         elif structure < 1.0:
             reason = "severe blur or close obstruction"
-        elif frozen:
-            reason = "frozen frame"
+        # Repeated identical *downscaled* frames are common in quiet live
+        # scenes. They cannot prove a frozen RTSP feed and must not suppress
+        # person inference or counting (camera freshness is checked separately).
         elif abrupt and structure < 8.0:
             reason = "abrupt low-structure occlusion"
 
