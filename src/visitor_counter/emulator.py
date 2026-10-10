@@ -100,6 +100,10 @@ class DigitalTwin:
     @staticmethod
     def _default_config() -> AppConfig:
         config = AppConfig()
+        # The original synthetic fixtures explicitly traverse a mid-frame
+        # line; physical deployments now default to confirmed edge exits.
+        for camera in config.cameras.values():
+            camera.counting_mode = "line"
         config.model.reid_required = True
         config.tracking.min_confirmed_hits = 2
         config.tracking.min_confirmed_track_hits = 3
