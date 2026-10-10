@@ -333,6 +333,8 @@ class CameraCapture(Thread):
         frames = 0
         while not self.stop_event.is_set():
             ok, image = capture.read()
+            if self.stop_event.is_set():
+                break
             if not ok or image is None or image.size == 0:
                 self.stats.decode_errors += 1
                 self._mark_failure(

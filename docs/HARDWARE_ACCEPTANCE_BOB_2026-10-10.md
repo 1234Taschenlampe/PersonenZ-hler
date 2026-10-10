@@ -40,14 +40,14 @@ Beide offiziellen HEFs wurden durch den Installer heruntergeladen und per SHA-25
 4. Manuelle schnelle Schalterwechsel erreichten das systemd-Startlimit. Explizite Benutzeraktionen setzen den Fehlerzähler zurück; automatische Absturzschleifen bleiben begrenzt.
 5. Die Freeze-Erkennung klassifizierte geringfügig veränderte Livebilder als eingefroren: vorher 38/40 bzw. 39/40 Frames blockiert, danach 0/40 bei beiden Kameras. Freeze-Erkennung verlangt jetzt mehrere bitidentische Frames; Verdeckungs- und Helligkeitsprüfung bleiben bestehen.
 6. Verbindungsaufbau bis zum ersten Reolink-Keyframe dauerte teils 6,6 Sekunden. Vorschau, Capture und Kameratest haben ein begrenztes 10-Sekunden-Zeitlimit; die Vorschau verwendet den Substream zur CPU-Entlastung.
-7. Lesefehler zählten Wiederverbindungsversuche nicht korrekt. Der Reconnect-Zähler wird jetzt beim Stream-Lesefehler aktualisiert.
+7. Lesefehler zählten Wiederverbindungsversuche nicht korrekt. Der Reconnect-Zähler wird jetzt beim Stream-Lesefehler aktualisiert. Ein angeforderter Dienststopp während eines blockierenden Leseaufrufs wird nicht als Kamera-/Dekodierfehler protokolliert.
 8. Tagesbesucher-Abfragen verwendeten bei benutzerdefinierten Datenbankpfaden einen anderen Ordner als der Zähldienst.
 9. RTSP-Diagnose unterscheidet Port-Erreichbarkeit, erforderliche/abgelehnte/erfolgreiche Anmeldung und Streamprofil. Ein erreichbares Profil ist ausdrücklich noch kein Videonachweis. Bildblockaden werden im Status und auf der Startseite erklärt.
 10. Die neu installierte OpenCV-5-Laufzeit erzeugte ONNX-Schemaregistrierungsfehler. Die Laufzeit ist auf OpenCV 4 begrenzt; auf BOB wurde 4.14.0 installiert und der gemeinsame Import von OpenCV, ONNX Runtime und Hailo geprüft.
 
 ## Tests und Grenzen der Abnahme
 
-- Nicht-Hardware-Pytest auf BOB: **178 bestanden, 1 übersprungen**, Hardwaretests dabei separat abgewählt.
+- Nicht-Hardware-Pytest auf BOB: **179 bestanden, 1 übersprungen**, Hardwaretests dabei separat abgewählt.
 - Vorhandene Hardwaretests auf BOB: **8 bestanden**. Der Video-Gerätetest allein beweist keine USB-Kameras; der Kameranachweis hier beruht auf tatsächlich dekodierten RTSP-Bildern.
 - Ruff gemäß CI-Auswahl `F,E9`, Python-Compile und Git-Diff-Prüfung bestanden. Globale zusätzliche Stilregeln sind nicht die CI-Abnahmeregeln dieses Projekts.
 - Digital Twin: **11/11 bestanden**. Das sind synthetische Logiktests, keine Personen-Praxisabnahme.

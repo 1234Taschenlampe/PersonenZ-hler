@@ -93,3 +93,20 @@ def test_decoded_stream_failure_reports_reconnect_attempt() -> None:
     assert camera.stats.decode_errors == 1
     assert camera.stats.reconnect_count == 1
     assert not camera.stats.connected
+
+
+def test_requested_shutdown_is_not_reported_as_decode_failure() -> None:
+    stop = Event()
+    camera = CameraCapture(
+        CameraConfig(camera_id="camera_1"), LatestFrameHub(["camera_1"]), stop
+    )
+
+    class Capture:
+        def read(self):
+            stop.set()
+            return False, None
+
+    camera._capture_loop(Capture())
+    assert camera.stats.decode_errors == 0
+    assert camera.stats.reconnect_count == 0
+    assert not camera.stats.last_error
