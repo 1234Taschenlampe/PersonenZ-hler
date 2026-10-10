@@ -80,7 +80,7 @@ def test_both_doors_accept_bidirectional_mapping_in_save_signal(app: QApplicatio
     for conf in saved[0].values():
         assert conf["entry_direction"] == "B_to_A"
         assert conf["exit_direction"] == "A_to_B"
-        assert conf["counting_mode"] == "line"
+        assert conf["counting_mode"] == "exit_edge"
 
 
 def test_video_source_status_distinguishes_live_and_stale_streams(app: QApplication) -> None:
