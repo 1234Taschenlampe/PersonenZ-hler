@@ -183,7 +183,7 @@ class CamerasPage(BasePage):
         toolbar = QHBoxLayout()
         discover = QPushButton("USB-Kameras suchen")
         discover.clicked.connect(self.discover_requested.emit)
-        network_scan = QPushButton("IP-Kameras suchen (RTSP + ONVIF)")
+        network_scan = QPushButton("IP-Geräte suchen (RTSP + ONVIF + LAN)")
         network_scan.setProperty("primary", True)
         self.scan_subnet = QLineEdit()
         self.scan_subnet.setPlaceholderText("Automatisch oder 192.168.1.0/24")
@@ -388,7 +388,8 @@ class CamerasPage(BasePage):
         self.discovery_status.setText(
             f"{len(sources)} Netzwerkkandidat(en): "
             f"{sum(item.rtsp_ready for item in sources)} mit RTSP-Port erreichbar, "
-            f"{sum(not item.rtsp_ready for item in sources)} nur ONVIF. "
+            f"{sum(item.discovery_method == 'ONVIF' for item in sources)} nur ONVIF, "
+            f"{sum(item.discovery_method == 'LAN' for item in sources)} weitere LAN-Geräte (unbestätigt). "
             "Bitte IP übernehmen, Zugangsdaten eingeben und Videoframe testen."
             if sources else "Keine neuen IP-Kameras gefunden. Gespeicherte Kameras bleiben erhalten. "
             "IP manuell eingeben oder anderes /24-Subnetz wählen."
