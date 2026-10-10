@@ -226,7 +226,7 @@ class ApplicationService:
         }
 
     def _daily_unique_count(self) -> int:
-        path = self.paths.data_dir / "daily_unique.sqlite3"
+        path = self._database_path(self.config()).parent / "daily_unique.sqlite3"
         if not path.exists():
             return 0
         day = datetime.now().astimezone().date().isoformat()

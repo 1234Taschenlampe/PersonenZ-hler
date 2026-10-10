@@ -282,7 +282,12 @@ class CameraCapture(Thread):
                 continue
             try:
                 if not capture.isOpened():
-                    self._mark_failure("RTSP-Zugriff nicht möglich: IP, Port, RTSP-Aktivierung oder Login prüfen")
+                    if source.lower().startswith("rtsp://"):
+                        from .rtsp_probe import probe_rtsp_source
+                        detail = probe_rtsp_source(source).detail
+                    else:
+                        detail = "Kameraquelle kann nicht geöffnet werden"
+                    self._mark_failure(detail)
                 else:
                     self._configure_capture(capture, source)
                     # isOpened() alone is NOT proof that an RTSP stream sends frames.
@@ -302,7 +307,9 @@ class CameraCapture(Thread):
         self.stats.state = "OFFLINE"
 
     def _open_capture(self, source: str) -> cv2.VideoCapture:
-        return open_camera_source(source, timeout_ms=5000)
+        # Reolink streams can require more than five seconds for the first
+        # keyframe. Still bound connection attempts and read stalls separately.
+        return open_camera_source(source, timeout_ms=10000)
 
     def _configure_capture(self, capture: cv2.VideoCapture, source: str) -> None:
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -326,12 +333,13 @@ class CameraCapture(Thread):
         frames = 0
         while not self.stop_event.is_set():
             ok, image = capture.read()
+            if self.stop_event.is_set():
+                break
             if not ok or image is None or image.size == 0:
                 self.stats.decode_errors += 1
-                self.stats.connected = False
-                self.stats.fps = 0.0
-                self.stats.last_error = "RTSP-Stream liefert keine Bilder; überprüfe Stream-Profil, Login, Netzwerk"
-                LOGGER.error("%s: %s", self.config.camera_id, self.stats.last_error)
+                self._mark_failure(
+                    "RTSP-Stream liefert keine Bilder; überprüfe Stream-Profil, Login, Netzwerk"
+                )
                 break
             if not self.stats.connected:
                 self.stats.connected = True

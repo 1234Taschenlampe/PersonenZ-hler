@@ -43,6 +43,8 @@ class BasePage(QWidget):
 
 
 class OverviewPage(BasePage):
+    preview_opt_in_changed = Signal(bool)
+
     def __init__(self) -> None:
         super().__init__(
             "Übersicht",
@@ -94,19 +96,39 @@ class OverviewPage(BasePage):
         self.inference_info.setProperty("muted", True)
         self.inference_info.setWordWrap(True)
         self.layout.addWidget(self.inference_info)
+        self.preview_toggle = QCheckBox(
+            "Anonymisierte Livebilder auf der Startseite anzeigen"
+        )
+        self.preview_toggle.setToolTip(
+            "Aktiviert die lokale Vorschau. Bilder werden vor der Anzeige "
+            "vollständig verpixelt; es werden keine Bilder gespeichert."
+        )
+        self.preview_toggle.clicked.connect(
+            lambda checked=False: self.preview_opt_in_changed.emit(bool(checked))
+        )
+        self.layout.addWidget(self.preview_toggle)
         self.preview_panel = CameraPreviewPanel(self)
         self.layout.addWidget(self.preview_panel)
         self.layout.addStretch()
 
+    def set_config(self, config: AppConfig) -> None:
+        self.preview_toggle.setChecked(config.display.show_camera_preview)
+
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
             card.set_value(snapshot.counts.get(key, 0))
-        runtime_ready = bool(snapshot.runtime.get("detector_active")) if (
-            "detector_active" in snapshot.runtime
-        ) else "Hailo-Inferenz aktiv" in str(snapshot.runtime.get("hailo_status", ""))
+        detector_active = snapshot.runtime.get("detector_active")
+        hailo_status = str(snapshot.runtime.get("hailo_status", ""))
+        runtime_ready = bool(detector_active) if detector_active is not None else (
+            hailo_status.lower() in {"ready", "ok", "bereit"}
+            or "Hailo-Inferenz aktiv" in hailo_status
+        )
+        detector_paused = snapshot.runtime.get("detector_enabled") is False
         self.health["KI-Beschleuniger"].set_state(
-            "ok" if runtime_ready else "error",
-            "Bereit" if runtime_ready else "Nicht bereit",
+            "warning" if detector_paused else ("ok" if runtime_ready else "error"),
+            "YOLO pausiert" if detector_paused else (
+                "Bereit" if runtime_ready else "Nicht bereit"
+            ),
         )
         online = sum(
             str(item.get("status", "")).upper() == "ONLINE" for item in snapshot.cameras
@@ -119,7 +141,12 @@ class OverviewPage(BasePage):
             inference_fps = float(snapshot.runtime.get("inference_fps") or 0)
         except (ValueError, TypeError):
             inference_fps = 0.0
-        if online and inference_fps <= 0:
+        if snapshot.runtime.get("detector_enabled") is False:
+            self.inference_info.setText(
+                "YOLO26m ist ausgeschaltet. Kameras dürfen weiter laufen; "
+                "Personenerkennung und Zähler sind pausiert."
+            )
+        elif online and inference_fps <= 0:
             self.inference_info.setText(
                 "Kamera überträgt Bilder, aber die KI verarbeitet derzeit keine Frames. "
                 "Zähldienst, Hailo und YOLO26m prüfen."
@@ -132,6 +159,13 @@ class OverviewPage(BasePage):
             )
         else:
             self.inference_info.setText("Keine laufende KI-Verarbeitung.")
+        blocked = [str(item.get("name") or item.get("camera_id"))
+                   for item in snapshot.cameras if item.get("obstructed")]
+        if blocked and not detector_paused:
+            self.inference_info.setText(
+                self.inference_info.text() + " Bildprüfung blockiert die Zählung für: "
+                + ", ".join(blocked) + ". Verdeckung, Beleuchtung oder eingefrorenen Stream prüfen."
+            )
         self.health["Datenbank"].set_state(
             "ok" if snapshot.database.get("exists") else "warning",
             "Bereit" if snapshot.database.get("exists") else "Noch leer",
@@ -176,7 +210,7 @@ class CamerasPage(BasePage):
         toolbar = QHBoxLayout()
         discover = QPushButton("USB-Kameras suchen")
         discover.clicked.connect(self.discover_requested.emit)
-        network_scan = QPushButton("IP-Kameras suchen (RTSP + ONVIF)")
+        network_scan = QPushButton("IP-Geräte suchen (RTSP + ONVIF + LAN)")
         network_scan.setProperty("primary", True)
         self.scan_subnet = QLineEdit()
         self.scan_subnet.setPlaceholderText("Automatisch oder 192.168.1.0/24")
@@ -386,7 +420,8 @@ class CamerasPage(BasePage):
         self.discovery_status.setText(
             f"{len(sources)} Netzwerkkandidat(en): "
             f"{sum(item.rtsp_ready for item in sources)} mit RTSP-Port erreichbar, "
-            f"{sum(not item.rtsp_ready for item in sources)} nur ONVIF. "
+            f"{sum(item.discovery_method == 'ONVIF' for item in sources)} nur ONVIF, "
+            f"{sum(item.discovery_method == 'LAN' for item in sources)} weitere LAN-Geräte (unbestätigt). "
             "Bitte IP übernehmen, Zugangsdaten eingeben und Videoframe testen."
             if sources else "Keine neuen IP-Kameras gefunden. Gespeicherte Kameras bleiben erhalten. "
             "IP manuell eingeben oder anderes /24-Subnetz wählen."
@@ -842,6 +877,20 @@ class SettingsPage(BasePage):
         self.reid = QDoubleSpinBox()
         self.reid.setRange(0.50, 0.99)
         self.reid.setSingleStep(0.01)
+        self.detector_enabled = QCheckBox(
+            "YOLO26m-Personenerkennung und Zählung aktivieren"
+        )
+        self.detector_enabled.setToolTip(
+            "Aus: Beide Kameras können weiter Bilder liefern, aber es werden "
+            "keine neuen Personenerkennungen oder Zählereignisse erzeugt."
+        )
+        self.reid_enabled = QCheckBox(
+            "OSNet-Re-ID und kameraübergreifende Zuordnung aktivieren"
+        )
+        self.reid_enabled.setToolTip(
+            "Aus: Die Linienzählung bleibt aktiv, aber keine sichere "
+            "kameraübergreifende Wiedererkennung oder eindeutige Tageszählung."
+        )
         self.timeout = QSpinBox()
         self.timeout.setRange(1, 1440)
         self.timeout.setSuffix(" Minuten")
@@ -859,6 +908,8 @@ class SettingsPage(BasePage):
         key_button.clicked.connect(lambda: self._choose_tls("private_key"))
         form.addRow("Detektionsschwelle", self.confidence)
         form.addRow("Re-ID-Schwelle", self.reid)
+        form.addRow("", self.detector_enabled)
+        form.addRow("", self.reid_enabled)
         form.addRow("Anwesenheits-Timeout", self.timeout)
         form.addRow("", self.api_enabled)
         form.addRow("API-Bindung", self.api_host)
@@ -883,6 +934,8 @@ class SettingsPage(BasePage):
     def set_config(self, config: AppConfig) -> None:
         self.confidence.setValue(config.model.confidence_threshold)
         self.reid.setValue(config.identity.reid_threshold)
+        self.detector_enabled.setChecked(config.model.detector_enabled)
+        self.reid_enabled.setChecked(config.model.reid_required)
         self.timeout.setValue(config.timeout.presence_timeout_minutes)
         self.api_enabled.setChecked(config.api.enabled)
         self.api_host.setText(config.api.bind_host)
@@ -895,6 +948,8 @@ class SettingsPage(BasePage):
             {
                 "model.confidence_threshold": self.confidence.value(),
                 "identity.reid_threshold": self.reid.value(),
+                "model.detector_enabled": self.detector_enabled.isChecked(),
+                "model.reid_required": self.reid_enabled.isChecked(),
                 "timeout.presence_timeout_minutes": self.timeout.value(),
                 "api.enabled": self.api_enabled.isChecked(),
                 "api.bind_host": self.api_host.text().strip(),

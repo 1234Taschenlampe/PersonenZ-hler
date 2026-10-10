@@ -6,6 +6,7 @@ from threading import Event
 
 import cv2
 import pytest
+import numpy as np
 
 from visitor_counter import network_camera_discovery as discovery
 from visitor_counter import camera_manager
@@ -20,6 +21,7 @@ def test_onvif_only_candidate_does_not_pretend_rtsp_is_ready(monkeypatch) -> Non
     monkeypatch.setattr(discovery, "discover_onvif_hosts", lambda: [
         "192.168.15.10", "192.168.15.12", "192.168.16.33",
     ])
+    monkeypatch.setattr(discovery, "neighbor_lan_hosts", lambda cidr="": [])
     results = discovery.discover_network_cameras("192.168.15.0/24")
     assert [result.host for result in results] == [
         "192.168.15.10", "192.168.15.12"
@@ -71,3 +73,40 @@ def test_invalid_camera_input_does_not_mark_online() -> None:
 def test_private_camera_network_predicate() -> None:
     assert discovery._is_lan(ipaddress.IPv4Address("192.168.55.9"))
     assert not discovery._is_lan(ipaddress.IPv4Address("8.8.8.8"))
+
+
+def test_decoded_stream_failure_reports_reconnect_attempt() -> None:
+    camera = CameraCapture(
+        CameraConfig(camera_id="camera_1"), LatestFrameHub(["camera_1"]), Event()
+    )
+
+    class Capture:
+        reads = 0
+
+        def read(self):
+            self.reads += 1
+            return (True, np.ones((10, 10, 3), dtype=np.uint8)) if self.reads == 1 else (False, None)
+
+    camera._capture_loop(Capture())
+    assert camera.stats.last_frame_time is not None
+    assert camera.stats.state == "RECONNECTING"
+    assert camera.stats.decode_errors == 1
+    assert camera.stats.reconnect_count == 1
+    assert not camera.stats.connected
+
+
+def test_requested_shutdown_is_not_reported_as_decode_failure() -> None:
+    stop = Event()
+    camera = CameraCapture(
+        CameraConfig(camera_id="camera_1"), LatestFrameHub(["camera_1"]), stop
+    )
+
+    class Capture:
+        def read(self):
+            stop.set()
+            return False, None
+
+    camera._capture_loop(Capture())
+    assert camera.stats.decode_errors == 0
+    assert camera.stats.reconnect_count == 0
+    assert not camera.stats.last_error

@@ -235,6 +235,7 @@ class RuntimeStats:
     detector_active: bool = False
     detector_error: str = ""
     camera_obstructed: dict[str, bool] = field(default_factory=dict)
+    camera_obstruction_reason: dict[str, str] = field(default_factory=dict)
     reid_status: str = "not checked"
     reid_hef_sha256: str = ""
     reid_inference_count: int = 0

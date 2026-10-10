@@ -55,6 +55,38 @@ def test_model_requirements_skip_training_and_torch() -> None:
     assert "torch" not in text
 
 
+def test_preflight_accepts_one_camera_with_detection_disabled(tmp_path: Path) -> None:
+    config = AppConfig()
+    config.cameras["camera_1"].device = "rtsp://camera-1.local/stream"
+    config.cameras["camera_2"].device = None
+    config.model.detector_enabled = False
+    config_file = tmp_path / "config.yaml"
+    save_config(config, config_file)
+    ok, detail = ready(tmp_path, config_file)
+    assert ok, detail
+
+
+def test_preflight_accepts_one_camera_with_detector_models(tmp_path: Path) -> None:
+    config = AppConfig()
+    config.cameras["camera_1"].device = "rtsp://camera-1.local/stream"
+    config.cameras["camera_2"].device = None
+    config.model.reid_required = False
+    for filename in (
+        config.model.hef_path,
+        config.model.postprocess_onnx_path,
+        config.model.postprocess_config_path,
+    ):
+        path = tmp_path / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"readiness fixture")
+    config_file = tmp_path / "config.yaml"
+    save_config(config, config_file)
+    ok, detail = ready(tmp_path, config_file)
+    assert ok, detail
+    (tmp_path / config.model.hef_path).unlink()
+    assert not ready(tmp_path, config_file)[0]
+
+
 @pytest.mark.skipif(sys.platform != "linux" or os.geteuid() == 0, reason="Linux unprivileged runner")
 def test_installer_dry_run_is_non_mutating(tmp_path: Path) -> None:
     env = dict(os.environ)

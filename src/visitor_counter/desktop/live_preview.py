@@ -9,6 +9,7 @@ from __future__ import annotations
 from threading import Event
 from time import monotonic
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import cv2
 from PySide6.QtCore import Qt, QThread, Signal
@@ -18,7 +19,22 @@ from PySide6.QtWidgets import (
 )
 
 from ..camera_manager import open_camera_source
+from ..privacy import anonymize_frame
 from .components import Card
+
+PREVIEW_OPEN_TIMEOUT_MS = 10000
+
+
+def preview_camera_source(source: str) -> str:
+    """Keep full-quality inference while using Reolink's low-bandwidth preview."""
+    parts = urlsplit(source)
+    paths = {
+        "/h264Preview_01_main": "/h264Preview_01_sub",
+        "/Preview_01_main": "/Preview_01_sub",
+    }
+    if parts.scheme.lower() in {"rtsp", "rtsps"} and parts.path in paths:
+        return urlunsplit(parts._replace(path=paths[parts.path]))
+    return source
 
 
 def online_camera_sources(
@@ -50,10 +66,13 @@ class _PreviewReader(QThread):
     image_ready = Signal(str, QImage)
     failed = Signal(str, str)
 
-    def __init__(self, camera_id: str, source: str, parent: QWidget) -> None:
+    def __init__(
+        self, camera_id: str, source: str, parent: QWidget, *, pixel_size: int = 24
+    ) -> None:
         super().__init__(parent)
         self.camera_id = camera_id
         self.source = source
+        self.pixel_size = max(24, pixel_size)
         self._stop_requested = Event()
 
     def stop(self) -> None:
@@ -62,7 +81,9 @@ class _PreviewReader(QThread):
     def run(self) -> None:
         capture = None
         try:
-            capture = open_camera_source(self.source, timeout_ms=3500)
+            capture = open_camera_source(
+                preview_camera_source(self.source), timeout_ms=PREVIEW_OPEN_TIMEOUT_MS
+            )
             if not capture.isOpened():
                 self.failed.emit(self.camera_id, "Vorschau nicht erreichbar")
                 return
@@ -79,6 +100,18 @@ class _PreviewReader(QThread):
                 height, width = frame.shape[:2]
                 if width <= 0 or height <= 0:
                     continue
+                target_width = min(width, 800)
+                target_height = max(1, round(height * target_width / width))
+                if target_width != width:
+                    frame = cv2.resize(
+                        frame, (target_width, target_height), interpolation=cv2.INTER_AREA
+                    )
+                # Never deliver identifiable raw frames to the desktop.
+                # No tracked boxes are available in the independent preview reader,
+                # so person-only anonymization would be ineffective here.
+                frame = anonymize_frame(
+                    frame, mode="full_frame", pixel_size=self.pixel_size
+                )
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = QImage(
                     rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0],
@@ -164,15 +197,31 @@ class CameraPreviewPanel(QWidget):
         self.grid.setSpacing(12)
         outer.addLayout(self.grid)
         self._active = True
+        self._preview_enabled = False  # Explicit opt-in in Datenschutz.
+        self._pixel_size = 24
         self._readers: dict[str, _PreviewReader] = {}
         self._retiring: set[_PreviewReader] = set()
         self._tiles: dict[str, _PreviewTile] = {}
         self._last_images: dict[str, QImage] = {}
+        self._retry_after: dict[str, float] = {}
         self._latest_cameras: list[dict[str, Any]] = []
         self._latest_sources: dict[str, str] = {}
         self._dialog: QDialog | None = None
         self._dialog_camera: str | None = None
         self._dialog_label: QLabel | None = None
+
+    def set_preview_policy(self, *, enabled: bool, pixel_size: int = 24) -> None:
+        """Apply local privacy consent immediately without restarting the Pi."""
+        pixel_size = max(24, int(pixel_size))
+        if self._preview_enabled == enabled and self._pixel_size == pixel_size:
+            return
+        self._preview_enabled = enabled
+        self._pixel_size = pixel_size
+        self._stop_all()
+        self._last_images.clear()
+        for tile in self._tiles.values():
+            tile.clear_image()
+        self.update_cameras(self._latest_cameras, self._latest_sources)
 
     def set_active(self, active: bool) -> None:
         if self._active == active:
@@ -193,17 +242,27 @@ class CameraPreviewPanel(QWidget):
     ) -> None:
         self._latest_cameras = list(cameras)
         self._latest_sources = dict(sources)
-        desired = online_camera_sources(cameras, sources) if self._active else []
-        target = {camera_id: (name, source) for camera_id, name, source in desired}
-        self.summary.setText(
-            f"{len(desired)} von {len(cameras)} Kameras online"
-            if desired else f"Keine Live-Kamera online (0 von {len(cameras)})"
+        desired = (
+            online_camera_sources(cameras, sources)
+            if self._active and self._preview_enabled else []
         )
+        target = {camera_id: (name, source) for camera_id, name, source in desired}
+        if not self._preview_enabled:
+            self.summary.setText(
+                "Lokale Vorschau aus. Mit dem Schalter oben aktivieren; "
+                "Datenschutz: Bilder werden vollständig verpixelt."
+            )
+        else:
+            self.summary.setText(
+                f"{len(desired)} von {len(cameras)} Kameras mit Live-Vorschau"
+                if desired else f"Keine Live-Kamera online (0 von {len(cameras)})"
+            )
         if self._dialog is not None and self._dialog_camera not in target:
             self._dialog.close()
         for camera_id in list(self._readers):
             if camera_id not in target or self._readers[camera_id].source != target[camera_id][1]:
                 self._stop_reader(camera_id)
+                self._retry_after.pop(camera_id, None)
         for camera_id in list(self._tiles):
             if camera_id not in target or self._tiles[camera_id].name != target[camera_id][0]:
                 tile = self._tiles.pop(camera_id)
@@ -219,9 +278,14 @@ class CameraPreviewPanel(QWidget):
             self.grid.addWidget(self._tiles[camera_id], index // 2, index % 2)
             reader = self._readers.get(camera_id)
             if reader is None or not reader.isRunning():
+                # Avoid opening a broken RTSP stream every 3-second UI refresh.
+                if monotonic() < self._retry_after.get(camera_id, 0.0):
+                    continue
                 if reader is not None:
                     self._stop_reader(camera_id)
-                reader = _PreviewReader(camera_id, source, self)
+                reader = _PreviewReader(
+                    camera_id, source, self, pixel_size=self._pixel_size
+                )
                 reader.image_ready.connect(
                     lambda cid, image, r=reader: (
                         self._on_image(cid, image) if self._readers.get(cid) is r else None
@@ -241,6 +305,7 @@ class CameraPreviewPanel(QWidget):
     def _on_image(self, camera_id: str, image: QImage) -> None:
         if not self._active or camera_id not in self._readers:
             return
+        self._retry_after.pop(camera_id, None)
         self._last_images[camera_id] = image
         tile = self._tiles.get(camera_id)
         if tile is not None:
@@ -249,6 +314,7 @@ class CameraPreviewPanel(QWidget):
             self._show_dialog_image(image)
 
     def _on_failure(self, camera_id: str, message: str) -> None:
+        self._retry_after[camera_id] = monotonic() + 8.0
         tile = self._tiles.get(camera_id)
         if tile is not None:
             tile.clear_image(message)
@@ -316,4 +382,4 @@ class CameraPreviewPanel(QWidget):
     def shutdown(self) -> None:
         self.set_active(False)
         for reader in list(self._retiring):
-            reader.wait(6500)
+            reader.wait(PREVIEW_OPEN_TIMEOUT_MS + 5000)

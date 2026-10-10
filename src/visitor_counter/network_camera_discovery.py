@@ -14,6 +14,7 @@ import socket
 import subprocess
 from time import monotonic
 from urllib.parse import quote
+from uuid import uuid4
 
 
 # Restrict discovery to RFC 1918 LAN addresses, not every special IPv4 range
@@ -42,7 +43,11 @@ class RtspCandidate:
         return (
             f"{self.host}:{self.port} · RTSP-Port erreichbar"
             if self.rtsp_ready
-            else f"{self.host} · ONVIF gefunden, RTSP noch unbestätigt"
+            else (
+                f"{self.host} · ONVIF gefunden, RTSP noch unbestätigt"
+                if self.discovery_method == "ONVIF"
+                else f"{self.host} · LAN-Gerät sichtbar; Kamerafunktion unbestätigt"
+            )
         )
 
     @property
@@ -141,7 +146,7 @@ def discover_onvif_hosts(*, timeout: float = 1.4) -> list[str]:
         '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" '
         'xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing" '
         'xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
-        '<e:Header><w:MessageID>uuid:34d65cae-9a14-4e2e-9871-6f163071a8cb</w:MessageID>'
+        f'<e:Header><w:MessageID>uuid:{uuid4()}</w:MessageID>'
         '<w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
         '<w:Action e:mustUnderstand="true">'
         'http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>'
@@ -173,6 +178,36 @@ def discover_onvif_hosts(*, timeout: float = 1.4) -> list[str]:
     return sorted(hosts, key=lambda host: int(ipaddress.IPv4Address(host)))[:64]
 
 
+def neighbor_lan_hosts(cidr: str = "") -> list[str]:
+    """Read already-visible local IPv4 neighbours without active probing."""
+    networks = [_allowed_network(cidr)] if cidr.strip() else local_networks()
+    if not networks:
+        return []
+    try:
+        response = subprocess.run(
+            ["ip", "-j", "-4", "neigh", "show"],
+            capture_output=True, text=True, check=False, timeout=3,
+        )
+        rows = json.loads(response.stdout) if response.returncode == 0 else []
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+    hosts: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_state = row.get("state", "")
+        states = raw_state if isinstance(raw_state, list) else [raw_state]
+        if any(str(state).upper() in {"FAILED", "INCOMPLETE", "NOARP"} for state in states):
+            continue
+        try:
+            address = ipaddress.IPv4Address(str(row["dst"]))
+        except (KeyError, ValueError):
+            continue
+        if _is_lan(address) and any(address in subnet for subnet in networks):
+            hosts.add(str(address))
+    return sorted(hosts, key=lambda host: int(ipaddress.IPv4Address(host)))[:64]
+
+
 def discover_network_cameras(cidr: str = "") -> list[RtspCandidate]:
     """Find RTSP-ready devices and ONVIF candidates, deduplicated by IP.
 
@@ -188,6 +223,10 @@ def discover_network_cameras(cidr: str = "") -> list[RtspCandidate]:
             continue
         if host not in by_ip:
             by_ip[host] = RtspCandidate(host, 554, "ONVIF", False)
+    # The neighbour table can reveal devices even when RTSP/ONVIF are disabled.
+    # They are clearly labelled as unverified LAN devices, never as video-ready.
+    for host in neighbor_lan_hosts(cidr):
+        by_ip.setdefault(host, RtspCandidate(host, 554, "LAN", False))
     return sorted(by_ip.values(), key=lambda item: int(ipaddress.IPv4Address(item.host)))
 
 

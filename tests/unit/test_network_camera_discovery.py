@@ -69,3 +69,23 @@ def test_invalid_reolink_host_rejected(host: str) -> None:
 def test_partial_credentials_not_silently_dropped() -> None:
     with pytest.raises(ValueError, match="Benutzername"):
         discovery.reolink_rtsp_url("10.0.0.8", username="admin")
+
+
+def test_visible_lan_neighbors_are_not_claimed_as_video(monkeypatch) -> None:
+    class Response:
+        returncode = 0
+        stdout = json.dumps([
+            {"dst": "192.168.50.7", "state": ["REACHABLE"]},
+            {"dst": "192.168.50.8", "state": "FAILED"},
+            {"dst": "192.168.51.9", "state": "STALE"},
+        ])
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Response())
+    assert discovery.neighbor_lan_hosts("192.168.50.0/24") == ["192.168.50.7"]
+    monkeypatch.setattr(discovery, "scan_rtsp_network", lambda cidr="": [])
+    monkeypatch.setattr(discovery, "discover_onvif_hosts", lambda: [])
+    found = discovery.discover_network_cameras("192.168.50.0/24")
+    assert [item.host for item in found] == ["192.168.50.7"]
+    assert found[0].discovery_method == "LAN"
+    assert not found[0].rtsp_ready
+    assert "unbestätigt" in found[0].label

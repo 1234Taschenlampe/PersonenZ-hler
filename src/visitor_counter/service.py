@@ -80,11 +80,14 @@ class VisitorCounterService:
             for camera in self.config.cameras.values()
             if not camera.device
         ]
-        if missing:
-            LOGGER.error(
-                "STARTUP_BLOCKED camera sources missing: %s", ", ".join(missing)
-            )
+        if len(missing) == len(self.config.cameras):
+            LOGGER.error("STARTUP_BLOCKED no camera sources configured")
             return 3
+        if missing:
+            LOGGER.warning(
+                "CAMERA_SLOTS_UNCONFIGURED %s; other cameras will continue",
+                ", ".join(missing),
+            )
 
         for capture in self.captures:
             capture.start()
@@ -156,6 +159,8 @@ class VisitorCounterService:
                         if camera.camera_id in stats.camera_last_processed_time
                         else None
                     ),
+                    "obstructed": stats.camera_obstructed.get(camera.camera_id, False),
+                    "obstruction_reason": stats.camera_obstruction_reason.get(camera.camera_id, ""),
                     "visible": self.pipeline.counters[camera.camera_id].counts.visible,
                     "entered": self.pipeline.counters[camera.camera_id].counts.entered,
                     "exited": self.pipeline.counters[camera.camera_id].counts.exited,
@@ -180,6 +185,9 @@ class VisitorCounterService:
             "cameras": cameras,
             "runtime": {
                 "inference_fps": round(stats.inference_fps, 1),
+                "detector_enabled": self.config.model.detector_enabled,
+                "detector_active": stats.detector_active,
+                "reid_enabled": self.config.model.reid_required,
                 "hailo_latency_ms": round(stats.inference_latency_ms, 1),
                 "total_latency_ms": round(stats.total_latency_ms, 1),
                 "frame_age_ms": round(stats.frame_age_ms, 1),
