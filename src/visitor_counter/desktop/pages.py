@@ -43,6 +43,8 @@ class BasePage(QWidget):
 
 
 class OverviewPage(BasePage):
+    preview_opt_in_changed = Signal(bool)
+
     def __init__(self) -> None:
         super().__init__(
             "Übersicht",
@@ -94,9 +96,21 @@ class OverviewPage(BasePage):
         self.inference_info.setProperty("muted", True)
         self.inference_info.setWordWrap(True)
         self.layout.addWidget(self.inference_info)
+        self.preview_toggle = QCheckBox(
+            "Anonymisierte Livebilder auf der Startseite anzeigen"
+        )
+        self.preview_toggle.setToolTip(
+            "Aktiviert die lokale Vorschau. Bilder werden vor der Anzeige "
+            "vollständig verpixelt; es werden keine Bilder gespeichert."
+        )
+        self.preview_toggle.clicked.connect(self.preview_opt_in_changed.emit)
+        self.layout.addWidget(self.preview_toggle)
         self.preview_panel = CameraPreviewPanel(self)
         self.layout.addWidget(self.preview_panel)
         self.layout.addStretch()
+
+    def set_config(self, config: AppConfig) -> None:
+        self.preview_toggle.setChecked(config.display.show_camera_preview)
 
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
@@ -106,9 +120,12 @@ class OverviewPage(BasePage):
             "ok",
             "bereit",
         }
+        detector_paused = snapshot.runtime.get("detector_enabled") is False
         self.health["KI-Beschleuniger"].set_state(
-            "ok" if runtime_ready else "error",
-            "Bereit" if runtime_ready else "Nicht bereit",
+            "warning" if detector_paused else ("ok" if runtime_ready else "error"),
+            "YOLO pausiert" if detector_paused else (
+                "Bereit" if runtime_ready else "Nicht bereit"
+            ),
         )
         online = sum(
             str(item.get("status", "")).upper() == "ONLINE" for item in snapshot.cameras
