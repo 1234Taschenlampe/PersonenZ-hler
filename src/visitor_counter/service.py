@@ -78,11 +78,14 @@ class VisitorCounterService:
             for camera in self.config.cameras.values()
             if not camera.device
         ]
-        if missing:
-            LOGGER.error(
-                "STARTUP_BLOCKED camera sources missing: %s", ", ".join(missing)
-            )
+        if len(missing) == len(self.config.cameras):
+            LOGGER.error("STARTUP_BLOCKED no camera sources configured")
             return 3
+        if missing:
+            LOGGER.warning(
+                "CAMERA_SLOTS_UNCONFIGURED %s; other cameras will continue",
+                ", ".join(missing),
+            )
 
         for capture in self.captures:
             capture.start()
