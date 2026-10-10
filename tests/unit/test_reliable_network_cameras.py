@@ -20,6 +20,7 @@ def test_onvif_only_candidate_does_not_pretend_rtsp_is_ready(monkeypatch) -> Non
     monkeypatch.setattr(discovery, "discover_onvif_hosts", lambda: [
         "192.168.15.10", "192.168.15.12", "192.168.16.33",
     ])
+    monkeypatch.setattr(discovery, "neighbor_lan_hosts", lambda cidr="": [])
     results = discovery.discover_network_cameras("192.168.15.0/24")
     assert [result.host for result in results] == [
         "192.168.15.10", "192.168.15.12"
