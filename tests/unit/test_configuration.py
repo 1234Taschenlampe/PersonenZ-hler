@@ -28,3 +28,15 @@ def test_config_validation_rejects_detector_fallback() -> None:
     errors = validate_config(config)
     assert any("fallback" in error.lower() for error in errors)
     assert any("yolo26m_detection_hailo10h_640.hef" in error for error in errors)
+
+
+def test_detector_and_reid_switches_are_persistent(tmp_path: Path) -> None:
+    config = AppConfig()
+    config.model.detector_enabled = False
+    config.model.reid_required = False
+    path = tmp_path / "switches.yaml"
+    save_config(config, path)
+    restored = load_config(path)
+    assert restored.model.detector_enabled is False
+    assert restored.model.reid_required is False
+    assert validate_config(restored) == []
