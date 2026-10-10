@@ -51,6 +51,7 @@ class ModelConfig:
     reid_model_name: str = "OSNet x1.0 HAILO10H"
     reid_hef_path: str = "models/osnet_x1_0_hailo10h.hef"
     reid_required: bool = True
+    detector_enabled: bool = True  # Pause YOLO/counting without disconnecting cameras.
     postprocess_onnx_path: str = "models/yolo26m_postprocessing.onnx"
     postprocess_config_path: str = "models/config_onnx_yolo26m.json"
     output_format: str = "yolo26_detection"
