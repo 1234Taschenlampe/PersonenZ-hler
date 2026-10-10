@@ -186,6 +186,7 @@ class CameraPreviewPanel(QWidget):
         self._retiring: set[_PreviewReader] = set()
         self._tiles: dict[str, _PreviewTile] = {}
         self._last_images: dict[str, QImage] = {}
+        self._retry_after: dict[str, float] = {}
         self._latest_cameras: list[dict[str, Any]] = []
         self._latest_sources: dict[str, str] = {}
         self._dialog: QDialog | None = None
@@ -244,6 +245,7 @@ class CameraPreviewPanel(QWidget):
         for camera_id in list(self._readers):
             if camera_id not in target or self._readers[camera_id].source != target[camera_id][1]:
                 self._stop_reader(camera_id)
+                self._retry_after.pop(camera_id, None)
         for camera_id in list(self._tiles):
             if camera_id not in target or self._tiles[camera_id].name != target[camera_id][0]:
                 tile = self._tiles.pop(camera_id)
@@ -259,6 +261,9 @@ class CameraPreviewPanel(QWidget):
             self.grid.addWidget(self._tiles[camera_id], index // 2, index % 2)
             reader = self._readers.get(camera_id)
             if reader is None or not reader.isRunning():
+                # Avoid opening a broken RTSP stream every 3-second UI refresh.
+                if monotonic() < self._retry_after.get(camera_id, 0.0):
+                    continue
                 if reader is not None:
                     self._stop_reader(camera_id)
                 reader = _PreviewReader(
@@ -283,6 +288,7 @@ class CameraPreviewPanel(QWidget):
     def _on_image(self, camera_id: str, image: QImage) -> None:
         if not self._active or camera_id not in self._readers:
             return
+        self._retry_after.pop(camera_id, None)
         self._last_images[camera_id] = image
         tile = self._tiles.get(camera_id)
         if tile is not None:
@@ -291,6 +297,7 @@ class CameraPreviewPanel(QWidget):
             self._show_dialog_image(image)
 
     def _on_failure(self, camera_id: str, message: str) -> None:
+        self._retry_after[camera_id] = monotonic() + 8.0
         tile = self._tiles.get(camera_id)
         if tile is not None:
             tile.clear_image(message)
