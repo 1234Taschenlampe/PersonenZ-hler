@@ -22,7 +22,9 @@ def test_hd_line_overlay_matches_actual_inference_frame() -> None:
     pipeline.config.display.show_camera_preview = True
     pipeline.config.display.anonymization_mode = "none"
     pipeline.config.cameras["camera_1"].counting_mode = "line"
-    pipeline.counters = {"camera_1": SimpleNamespace(_tracks={})}
+    pipeline.counters = {"camera_1": SimpleNamespace(
+        _tracks={}, counts=SimpleNamespace(entered=0, exited=0)
+    )}
     source = np.full((1080, 1920, 3), 140, dtype=np.uint8)
     packet = FramePacket.from_image("camera_1", 1, source, 1.0)
     annotated = pipeline._annotate(packet, [])
