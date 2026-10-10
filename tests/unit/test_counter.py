@@ -44,6 +44,7 @@ def _create_counter(
         role=role,
         entry_direction="A_to_B",
         exit_direction="B_to_A",
+        counting_mode="line",  # legacy line-crossing fixture
     )
     return LineCrossingCounter(camera_id, line, tracking_config, camera_config)
 
