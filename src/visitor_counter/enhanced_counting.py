@@ -411,11 +411,12 @@ class EnhancedProcessingPipeline(ProcessingPipeline):
         super()._emit_stats()
 
     def reset_counts(self) -> None:
-        super().reset_counts()
-        self.daily_unique_store.reset()
-        self._latest_embeddings_by_global_id.clear()
-        self.global_counts.daily_unique = 0
-        self.global_counts.daily_unique_degraded = self.daily_unique_store.degraded
+        with self._state_lock:
+            super().reset_counts()
+            self.daily_unique_store.reset()
+            self._latest_embeddings_by_global_id.clear()
+            self.global_counts.daily_unique = 0
+            self.global_counts.daily_unique_degraded = self.daily_unique_store.degraded
 
 
 def install_enhanced_gui(gui_module: Any) -> None:
