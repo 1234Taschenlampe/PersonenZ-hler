@@ -332,7 +332,16 @@ class CameraCapture(Thread):
         last_tick = monotonic()
         frames = 0
         while not self.stop_event.is_set():
-            ok, image = capture.read()
+            try:
+                ok, image = capture.read()
+            except (cv2.error, OSError, RuntimeError, ValueError) as exc:
+                if self.stop_event.is_set():
+                    break
+                self.stats.decode_errors += 1
+                self._mark_failure(
+                    f"RTSP/Videolesefehler ({type(exc).__name__}); Verbindung wird erneut aufgebaut"
+                )
+                break
             if self.stop_event.is_set():
                 break
             if not ok or image is None or image.size == 0:
