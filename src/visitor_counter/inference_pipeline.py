@@ -172,6 +172,7 @@ class ProcessingPipeline(Thread):
         try:
             with ThreadPoolExecutor(max_workers=max(1, len(self._camera_order)), thread_name_prefix="inference-camera") as pool:
                 pending: dict[str, Future[None]] = {}
+                deferred_packet: FramePacket | None = None
                 while not self.stop_event.is_set():
                     for camera_id, future in list(pending.items()):
                         if future.done():
@@ -186,17 +187,23 @@ class ProcessingPipeline(Thread):
                     if self.stop_event.is_set():
                         break
                     available = [cam for cam in self._camera_order if cam not in pending]
-                    if available:
-                        packet = self.input_queue.get_next(
-                            available, self._last_camera_id, timeout=0.05,
-                            max_age_seconds=self._max_frame_age_seconds,
-                        )
+                    if available and (deferred_packet is None or deferred_packet.camera_id in available):
+                        packet = deferred_packet
+                        deferred_packet = None
+                        if packet is None:
+                            packet = self.input_queue.get_next(
+                                available, self._last_camera_id, timeout=0.05,
+                                max_age_seconds=self._max_frame_age_seconds,
+                            )
                         if packet is not None:
                             if packet.camera_id in available:
                                 self._last_camera_id = packet.camera_id
                                 pending[packet.camera_id] = pool.submit(self._process_packet, packet)
                             else:
-                                LOGGER.warning("CAMERA_QUEUE_UNEXPECTED camera=%s", packet.camera_id)
+                                # A custom queue adapter might ignore camera_order.
+                                # Hold its packet instead of dropping a countable frame.
+                                deferred_packet = packet
+                                LOGGER.debug("CAMERA_QUEUE_DEFERRED camera=%s", packet.camera_id)
                     elif pending:
                         wait(tuple(pending.values()), timeout=0.05, return_when=FIRST_COMPLETED)
                     now = monotonic()
