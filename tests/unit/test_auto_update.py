@@ -199,3 +199,29 @@ def test_old_install_path_is_rejected_before_merge(auto_env, monkeypatch):
                         lambda *_args: (False, "Running PR18 service"))
     assert updater.update(auto_env) == 1
     assert state["head"] == "a" * 40
+
+def test_daytime_only_checks_updates_without_restart(auto_env, monkeypatch):
+    state = _stub_git(auto_env, monkeypatch)
+    _stub_run(state, monkeypatch)
+    monkeypatch.setattr(updater.time, "localtime", lambda: SimpleNamespace(tm_hour=14))
+    monkeypatch.setattr(updater, "installer",
+                        lambda *_args, **kwargs: pytest.fail("No install during presentations"))
+    assert updater.update(auto_env) == 0
+    assert state["head"] == "a" * 40
+    report = json.loads(
+        (Path(__import__("os").environ["XDG_STATE_HOME"])
+         / "personenzaehler/auto-update-status.json").read_text()
+    )
+    assert report["result"] == "available"
+
+
+def test_explicit_apply_now_overrides_quiet_hours_but_not_ci(auto_env, monkeypatch):
+    state = _stub_git(auto_env, monkeypatch)
+    _stub_run(state, monkeypatch)
+    monkeypatch.setattr(updater.time, "localtime", lambda: SimpleNamespace(tm_hour=14))
+    monkeypatch.setattr(updater, "service_running", lambda *_args: True)
+    monkeypatch.setattr(updater, "installer", lambda *_args, **kwargs: None)
+    monkeypatch.setattr(updater.update_safety, "wait_for_recovery",
+                        lambda *args, **kwargs: None)
+    assert updater.update(auto_env, apply_now=True) == 0
+    assert state["head"] == "b" * 40
