@@ -633,10 +633,10 @@ class ProcessingPipeline(Thread):
             else:
                 edges = [
                     ((margin, 0), (margin, packet.height - 1),
-                     "B" if nx > 0 else "A"),
+                     "A" if nx > 0 else "B"),
                     ((packet.width - margin - 1, 0),
                      (packet.width - margin - 1, packet.height - 1),
-                     "A" if nx > 0 else "B"),
+                     "B" if nx > 0 else "A"),
                 ]
             for first, second, side in edges:
                 transition = "A_to_B" if side == "B" else "B_to_A"
@@ -680,7 +680,8 @@ class ProcessingPipeline(Thread):
             memory = counter._tracks.get(track.track_id)
             zone_text = memory.stable_zone if memory else "neutral"
             counted_text = "ja" if (memory and memory.counted) else "nein"
-            dir_text = "IN" if camera_config.role == "entrance" else "OUT"
+            # Each door supports both directions; location is not a direction.
+            dir_text = "IN/OUT"
 
             label = f"ID:{track.track_id} Z:{zone_text} R:{dir_text} C:{counted_text}"
             cv2.putText(
