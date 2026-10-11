@@ -160,3 +160,46 @@ def test_second_hailo_allocation_failure_retains_first_model(monkeypatch, tmp_pa
     assert pipeline.runtime_stats.parallel_inference_mode == (
         "parallel_camera_workers_serialized_shared_models"
     )
+
+def test_secondary_hailo_runtime_error_falls_back_to_primary_context():
+    from visitor_counter.hailo_manager import HailoUnavailableError
+
+    class Primary:
+        ready = True
+        last_stage_ms = {}
+        last_latency_ms = 2.0
+        inference_count = 0
+
+        def infer(self, _image):
+            self.inference_count += 1
+            return []
+
+    class Secondary:
+        last_stage_ms = {}
+        last_latency_ms = 3.0
+        inference_count = 0
+        closed = False
+
+        def infer(self, _image):
+            raise HailoUnavailableError("secondary Hailo context lost")
+
+        def close(self):
+            self.closed = True
+
+    pipeline = object.__new__(ProcessingPipeline)
+    pipeline.config = AppConfig()
+    pipeline.hailo = primary = Primary()
+    secondary = Secondary()
+    pipeline._hailo_workers = {"camera_1": primary, "camera_2": secondary}
+    pipeline._shared_hailo_lock = Lock()
+    pipeline._camera_hailo_stage_ms = {}
+    pipeline._camera_hailo_latency_ms = {}
+    pipeline.runtime_stats = RuntimeStats()
+    pipeline._camera_ai_ticks = {}
+    assert pipeline._detect(_packet("camera_2")) == []
+    assert secondary.closed
+    assert pipeline._hailo_workers["camera_2"] is primary
+    assert primary.inference_count == 1
+    assert pipeline.runtime_stats.parallel_inference_mode == (
+        "parallel_camera_workers_serialized_shared_models"
+    )
