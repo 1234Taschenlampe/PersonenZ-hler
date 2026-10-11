@@ -481,6 +481,8 @@ class ProcessingPipeline(Thread):
             self._inside_global_person_ids.clear()
             self._live_presence.clear()
             self._last_persisted_global_counts = None
+            with self._cache_lock:
+                self._reid_cache.clear()
 
     def _sync_live_presence_counts(
         self, visible_ids: set[int], timestamp: float
