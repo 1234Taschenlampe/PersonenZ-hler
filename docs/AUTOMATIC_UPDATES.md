@@ -32,14 +32,20 @@ divergierende Historie wird nicht automatisch ersetzt.
 
 - **Zeitplan:** 15 Minuten nach Systemstart und täglich um 03:00, 09:00,
   15:00 und 21:00 Uhr, jeweils mit einer zufälligen Verzögerung von
-  bis zu 10 Minuten. Der nächste fällige Termin steht in `list-timers`.
+  bis zu 10 Minuten. Tagsüber wird nur geprüft; automatische Installation und
+  Neustarts sind auf **02:00–05:00 Uhr Pi-Lokalzeit** begrenzt.
+  Der nächste Termin steht in `list-timers`.
 - **Keine Änderung:** Der Updater protokolliert nur die aktuelle Revision.
-- **Neue Revision:** Download via `git fetch`, Fast-Forward auf `main`,
-  Shell-/Python-Syntaxprüfung, erneuter Aufruf des idempotenten Installers.
+- **Neue Revision:** Download via `git fetch`, Freigabe nur bei grünen GitHub-
+  CI-Jobs (Python 3.11, Python 3.12, Debian-Paket), Vorabprüfung des neuen
+  Codes in einem separaten Git-Worktree und erst danach Fast-Forward auf `main`
+  sowie Aufruf des idempotenten Installers.
   Fehlende Python-Abhängigkeiten und Modelle werden gemäß Installer bei Bedarf
   aktualisiert bzw. geprüft.
-- **Aktivierung:** Bereits laufende Zähl-, API- und Desktopdienste werden
-  über den Installer neu gestartet. Bewusst gestoppte Zähldienste werden
+- **Aktivierung:** Vor dem Neustart wird geprüft, dass laufende Dienste
+  tatsächlich auf denselben Git-Checkout zeigen. Bereits laufende Zähl-,
+  API- und Desktopdienste werden über den Installer neu gestartet.
+  Nachher müssen zuvor funktionierende Kameras erneut KI-Bilder verarbeiten. Bewusst gestoppte Zähldienste werden
   dadurch nicht ungefragt gestartet.
 - **Fehler:** Bei Installations- oder Gesundheitsfehler versucht der Updater,
   den vorherigen Git-Stand und die alte Installation wiederherzustellen.
@@ -52,6 +58,8 @@ Die Quelle, Konfiguration, Kamera-Zugangsdaten, Lizenz, API-Schlüssel und
 Datenbank werden nicht bewusst überschrieben. Der Updater läuft als
 unprivilegierter Benutzer-Systemdienst; fehlen neue Betriebssystempakete,
 die Administratorrechte benötigen, ist eine manuelle Installation nötig.
+CI-Fehler oder eine nicht erreichbare GitHub-Checks-API verhindern bewusst das
+automatische Update. Der letzte bekannte, funktionierende Stand läuft weiter.
 
 ## Status und manuelle Prüfung
 
@@ -64,7 +72,12 @@ python3 ~/.local/share/personenzaehler/app/scripts/auto_update.py --check-only
 
 Eine sofortige Aktualisierung kann man über
 `systemctl --user start personenzaehler-update.service` auslösen.
-Dies kann laufende Videofeeds und das GUI **neu starten**.
+Außerhalb des Nachtfensters wird dabei **nur geprüft**. Für eine bewusste
+sofortige Installation (kann die Videofeeds und die GUI neu starten):
+
+```bash
+python3 ~/.local/share/personenzaehler/app/scripts/auto_update.py --apply-now
+```
 
 ## Vorführung: Updates vorübergehend sperren
 
