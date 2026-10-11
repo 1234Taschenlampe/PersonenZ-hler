@@ -213,6 +213,7 @@ class RuntimeStats:
     camera_last_consensus_reason: dict[str, str] = field(default_factory=dict)
     camera_inference_latency_ms: dict[str, float | None] = field(default_factory=dict)
     inference_fps: float = 0.0
+    parallel_inference_mode: str = "not_initialized"
     camera_processed_frames: dict[str, int] = field(default_factory=dict)
     camera_raw_person_detections: dict[str, int] = field(default_factory=dict)
     camera_person_detections: dict[str, int] = field(default_factory=dict)
