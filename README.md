@@ -53,10 +53,12 @@ HailoRT und die Firmware sind hardwarespezifische Herstellerkomponenten. Die Anw
 
 Nach der einmaligen Installation prüft ein **systemd-Benutzer-Timer** das
 freigegebene `main`-Repository ungefähr alle sechs Stunden auf neue Commits.
-Updates werden nur bei sauberem, unverändertem Quellcode per Fast-Forward
-installiert. Der Installer übernimmt fehlende Laufzeit-Abhängigkeiten und
-aktiviert bereits laufende Zähl-, API- und GUI-Dienste erneut. Der letzte
-Status steht unter `~/.local/state/personenzaehler/auto-update-status.json`.
+**Tagsüber erfolgt nur die Prüfung**; zwischen 02:00 und 05:00 Uhr Pi-Lokalzeit
+werden erfolgreiche GitHub-CI-Versionen nach einer Prüfung im separaten
+Checkout automatisch installiert. Bereits aktive Zähl-, API- und GUI-Dienste
+werden danach neu gestartet. Der Updater kontrolliert, dass zuvor funktionierende
+Kameras auch danach wieder KI-Bilder verarbeiten. Der letzte Status steht
+unter `~/.local/state/personenzaehler/auto-update-status.json`.
 
 Zum Schutz laufender Vorführungen lassen sich Updates jederzeit mit
 `touch ~/.config/personenzaehler/auto-update.paused` aussetzen; danach
