@@ -2,4 +2,4 @@
 # Ultralytics, pytest, onnx export tools) deliberately are NOT installed on the Pi.
 # Project metadata installs the desktop and counter's core runtime libraries.
 -e .
-onnxruntime>=1.17
+onnxruntime>=1.30.0
