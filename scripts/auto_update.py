@@ -101,6 +101,7 @@ def installer(root: Path, *, rollback: bool = False) -> None:
         "PERSONENZAEHLER_CODE_UPDATED": "1",
         "DEBIAN_FRONTEND": "noninteractive",
         "GIT_TERMINAL_PROMPT": "0",
+        "PERSONENZAEHLER_UNATTENDED": "1",
     })
     args = ["bash", str(root / "scripts" / "install_linux_app.sh")]
     # Revalidate existing models even for rollback: --skip-models deliberately
