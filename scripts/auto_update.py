@@ -111,7 +111,12 @@ def installer(root: Path, *, rollback: bool = False) -> None:
     exec_checked(args, cwd=root, env=env, timeout=1200)
 
 
-def update(root: Path, *, check_only: bool = False) -> int:
+def update(root: Path, *, check_only: bool = False, apply_now: bool = False) -> int:
+    # Deploy during a quiet local maintenance window only. Other scheduled
+    # runs still fetch and report available revisions without restarting video.
+    if not check_only and not apply_now and not (2 <= time.localtime().tm_hour < 5):
+        log("Tagsüber nur Update-Prüfung; Installation nachts 02:00-05:00.")
+        check_only = True
     root = root.expanduser().resolve()
     cache_dir = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "personenzaehler"
     config_dir = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "personenzaehler"
@@ -236,8 +241,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Periodischer GitHub-Updater für PersonenZähler")
     parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--check-only", action="store_true", help="Neue Version suchen, aber nichts installieren")
+    parser.add_argument("--apply-now", action="store_true", help="Update sofort nach Sicherheitsprüfungen installieren")
     args = parser.parse_args()
-    return update(args.project_root, check_only=args.check_only)
+    return update(args.project_root, check_only=args.check_only, apply_now=args.apply_now)
 
 
 if __name__ == "__main__":
