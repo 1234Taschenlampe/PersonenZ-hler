@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "auto_update.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("personenzaehler_auto_update", SCRIPT)
 assert spec and spec.loader
 updater = importlib.util.module_from_spec(spec)
@@ -27,6 +29,12 @@ def auto_env(tmp_path, monkeypatch):
     root = tmp_path / "app"
     root.mkdir()
     (root / ".git").mkdir()
+    # The CI and release-safety gates are independently tested below.
+    monkeypatch.setattr(updater.update_safety, "ci_approved", lambda _sha: (True, "ok"))
+    monkeypatch.setattr(updater.update_safety, "preflight_candidate", lambda *_args: None)
+    monkeypatch.setattr(updater.update_safety, "service_paths_correct",
+                        lambda *_args: (True, "ok"))
+    monkeypatch.setattr(updater.update_safety, "healthy_cameras_before_update", lambda: set())
     return root
 
 
@@ -114,7 +122,8 @@ def test_new_commit_installs_and_checks_services(auto_env, monkeypatch):
     monkeypatch.setattr(updater, "service_running", lambda *_args: True)
     called = []
     monkeypatch.setattr(updater, "installer", lambda *args, **kwargs: called.append("install"))
-    monkeypatch.setattr(updater, "check_health", lambda *args: called.append("health"))
+    monkeypatch.setattr(updater.update_safety, "wait_for_recovery",
+                        lambda *args, **kwargs: called.append("health"))
     assert updater.update(auto_env) == 0
     assert state["head"] == "b" * 40
     assert called == ["install", "health"]
@@ -132,7 +141,8 @@ def test_bad_install_rolls_back_without_touching_data(auto_env, monkeypatch):
             raise RuntimeError("new version broken")
 
     monkeypatch.setattr(updater, "installer", fake_installer)
-    monkeypatch.setattr(updater, "check_health", lambda *args: None)
+    monkeypatch.setattr(updater.update_safety, "wait_for_recovery",
+                        lambda *args, **kwargs: None)
     assert updater.update(auto_env) == 1
     assert state["head"] == "a" * 40
     assert installs == [False, True]
@@ -150,3 +160,41 @@ def test_updater_timer_is_configured_by_source_installer():
     assert "OnCalendar=*-*-* 03,09,15,21:00:00" in script
     assert "Persistent=true" in script
     assert "ExecStart=/usr/bin/python3 $PWD/scripts/auto_update.py" in script
+
+def test_failing_ci_does_not_change_running_installation(auto_env, monkeypatch):
+    state = _stub_git(auto_env, monkeypatch)
+    _stub_run(state, monkeypatch)
+    monkeypatch.setattr(updater.update_safety, "ci_approved",
+                        lambda _sha: (False, "Unit test failed"))
+    monkeypatch.setattr(updater, "installer",
+                        lambda *_args, **kwargs: pytest.fail("Must not install"))
+    assert updater.update(auto_env) == 0
+    assert state["head"] == "a" * 40
+    report = json.loads(
+        (Path(__import__("os").environ["XDG_STATE_HOME"])
+         / "personenzaehler/auto-update-status.json").read_text()
+    )
+    assert report["result"] == "blocked_ci"
+
+
+def test_candidate_fails_before_merge_without_disrupting_services(auto_env, monkeypatch):
+    state = _stub_git(auto_env, monkeypatch)
+    _stub_run(state, monkeypatch)
+
+    def invalid_candidate(*_args):
+        raise RuntimeError("Invalid shell syntax")
+
+    monkeypatch.setattr(updater.update_safety, "preflight_candidate", invalid_candidate)
+    assert updater.update(auto_env) == 1
+    assert state["head"] == "a" * 40
+    assert ("merge", "--ff-only", "b" * 40) not in state["actions"]
+
+
+def test_old_install_path_is_rejected_before_merge(auto_env, monkeypatch):
+    state = _stub_git(auto_env, monkeypatch)
+    _stub_run(state, monkeypatch)
+    monkeypatch.setattr(updater, "service_running", lambda *_args: True)
+    monkeypatch.setattr(updater.update_safety, "service_paths_correct",
+                        lambda *_args: (False, "Running PR18 service"))
+    assert updater.update(auto_env) == 1
+    assert state["head"] == "a" * 40
