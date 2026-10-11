@@ -125,6 +125,52 @@ WantedBy=default.target
 SERVICE
 
 write_if_changed "$api"
+# Automatic source updates are intentionally user-level. The updater checks
+# only pinned origin/main and refuses dirty or divergent working trees.
+updater="$unit_dir/personenzaehler-update.service"
+cat > "$updater.new" <<SERVICE
+[Unit]
+Description=PersonenZähler - sicheres automatisches GitHub-Update
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=$PWD
+Environment=PERSONENZAEHLER_USE_XDG=1
+Environment="XDG_CONFIG_HOME=$config_base"
+Environment="XDG_DATA_HOME=$data_base"
+Environment="XDG_STATE_HOME=$state_base"
+Environment="XDG_CACHE_HOME=$cache_base"
+Environment=DEBIAN_FRONTEND=noninteractive
+Environment=GIT_TERMINAL_PROMPT=0
+ExecStart=/usr/bin/python3 $PWD/scripts/auto_update.py --project-root $PWD
+TimeoutStartSec=30min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+RestrictSUIDSGID=true
+
+SERVICE
+write_if_changed "$updater"
+timer="$unit_dir/personenzaehler-update.timer"
+cat > "$timer.new" <<TIMER
+[Unit]
+Description=PersonenZähler - GitHub main alle sechs Stunden prüfen
+
+[Timer]
+OnBootSec=15min
+OnCalendar=*-*-* 03,09,15,21:00:00
+AccuracySec=5min
+RandomizedDelaySec=10min
+Persistent=true
+Unit=personenzaehler-update.service
+
+[Install]
+WantedBy=timers.target
+TIMER
+write_if_changed "$timer"
 if ! command -v systemctl >/dev/null 2>&1 ||
    ! systemctl --user show-environment >/dev/null 2>&1; then
   echo "WARNUNG: systemd-Benutzerbus nicht erreichbar (SSH ohne User-Session?)."
@@ -141,6 +187,13 @@ for unit in visitor-counter.service personenzaehler.service personenzaehler-mobi
     systemctl --user enable "$unit"
   fi
 done
+# A timer is started now; missed scheduled checks are retried after login.
+if ! systemctl --user is-enabled --quiet personenzaehler-update.timer; then
+  systemctl --user enable personenzaehler-update.timer
+fi
+if ! systemctl --user is-active --quiet personenzaehler-update.timer; then
+  systemctl --user start personenzaehler-update.timer
+fi
 if [[ -f "$config_file" && -f "$secrets" ]]; then
   if systemctl --user is-active --quiet personenzaehler-mobile-api.service; then
     if [[ "$changed" -eq 1 || "${PERSONENZAEHLER_CODE_UPDATED:-0}" == 1 ]]; then
@@ -157,6 +210,12 @@ if systemctl --user is-active --quiet personenzaehler.service; then
   if [[ "$changed" -eq 1 || "${PERSONENZAEHLER_CODE_UPDATED:-0}" == 1 ]]; then
     systemctl --user restart personenzaehler.service
   fi
+fi
+# Activate GUI code too if the user already has the desktop service open.
+# A paused updater never invokes the installer, so demonstrations can opt out.
+if [[ "${PERSONENZAEHLER_CODE_UPDATED:-0}" == 1 ]] &&
+   systemctl --user is-active --quiet visitor-counter.service; then
+  systemctl --user restart visitor-counter.service
 fi
 # Desktop session variables may be provided by the login manager on Wayland.
 systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1 || true
