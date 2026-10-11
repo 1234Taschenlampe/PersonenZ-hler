@@ -1,11 +1,11 @@
 cryptography>=44.0
 numpy>=1.24
-opencv-python>=4.8,<5
+opencv-python>=4.8,<6
 psutil>=5.9
 PySide6>=6.6
 PyYAML>=6.0
-pytest>=8.0
-onnx>=1.15
-onnxruntime>=1.17
+pytest>=9.1.1
+onnx>=1.23.2
+onnxruntime>=1.30.0
 paramiko>=3.4
-ultralytics>=8.3
+ultralytics>=8.4.174
