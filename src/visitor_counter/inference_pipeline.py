@@ -471,15 +471,16 @@ class ProcessingPipeline(Thread):
         self.runtime_stats.dropped_frames = self.input_queue.dropped_counts()
 
     def reset_counts(self) -> None:
-        for counter in self.counters.values():
-            counter.reset()
-        self.consensus.reset()
-        self.identity.reset()
-        self.database.reset_global_counts()
-        self.global_counts = GlobalCounts()
-        self._inside_global_person_ids.clear()
-        self._live_presence.clear()
-        self._last_persisted_global_counts = None
+        with self._state_lock:
+            for counter in self.counters.values():
+                counter.reset()
+            self.consensus.reset()
+            self.identity.reset()
+            self.database.reset_global_counts()
+            self.global_counts = GlobalCounts()
+            self._inside_global_person_ids.clear()
+            self._live_presence.clear()
+            self._last_persisted_global_counts = None
 
     def _sync_live_presence_counts(
         self, visible_ids: set[int], timestamp: float
@@ -640,10 +641,27 @@ class ProcessingPipeline(Thread):
             shared = sum(value is manager for value in self._hailo_workers.values()) > 1
             # A separate HailoRT context per camera is preferred. A hardware
             # allocation failure falls back to serial calls on the shared one.
-            with self._shared_hailo_lock if shared else nullcontext():
-                detections = manager.infer(packet.image)
-                self._camera_hailo_stage_ms[packet.camera_id] = dict(manager.last_stage_ms)
-                self._camera_hailo_latency_ms[packet.camera_id] = manager.last_latency_ms
+            try:
+                with self._shared_hailo_lock if shared else nullcontext():
+                    detections = manager.infer(packet.image)
+                    self._camera_hailo_stage_ms[packet.camera_id] = dict(manager.last_stage_ms)
+                    self._camera_hailo_latency_ms[packet.camera_id] = manager.last_latency_ms
+            except HailoUnavailableError:
+                if manager is self.hailo:
+                    raise
+                # A secondary context can fail after successful initialization,
+                # e.g. following a firmware reset. Continue with the primary
+                # configured model without killing either camera worker.
+                LOGGER.warning("PARALLEL_HAILO_RUNTIME_FALLBACK camera=%s", packet.camera_id)
+                manager.close()
+                self._hailo_workers[packet.camera_id] = self.hailo
+                self.runtime_stats.parallel_inference_mode = (
+                    "parallel_camera_workers_serialized_shared_models"
+                )
+                with self._shared_hailo_lock:
+                    detections = self.hailo.infer(packet.image)
+                    self._camera_hailo_stage_ms[packet.camera_id] = dict(self.hailo.last_stage_ms)
+                    self._camera_hailo_latency_ms[packet.camera_id] = self.hailo.last_latency_ms
             self.runtime_stats.camera_inference_status[packet.camera_id] = "active"
             self.runtime_stats.camera_ai_processed_frames[packet.camera_id] = (
                 self.runtime_stats.camera_ai_processed_frames.get(packet.camera_id, 0) + 1
