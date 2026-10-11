@@ -37,9 +37,9 @@ def test_dispatches_two_cameras_simultaneously_without_reordering_tracks(tmp_pat
 
         def get_next(self, camera_order, *_args, **_kwargs):
             with dispatch_lock:
-                for packet in list(remaining):
+                for index, packet in enumerate(remaining):
                     if packet.camera_id in camera_order:
-                        remaining.remove(packet)
+                        del remaining[index]
                         return packet
             return None
 
