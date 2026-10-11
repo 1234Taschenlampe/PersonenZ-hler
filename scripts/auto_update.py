@@ -15,6 +15,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import update_safety
 from datetime import datetime, timezone
 
 EXPECTED_ORIGIN = "https://github.com/1234Taschenlampe/PersonenZ-hler"
@@ -166,19 +167,35 @@ def update(root: Path, *, check_only: bool = False) -> int:
                 write_result(state_dir, result="available", revision=before, available_revision=after)
                 return 0
 
+            # Fail closed: never deploy a commit that lacks passing CI.
+            approved, explanation = update_safety.ci_approved(after)
+            if not approved:
+                log("Update wartet auf erfolgreiche GitHub-Tests: " + explanation)
+                write_result(state_dir, result="blocked_ci", revision=before,
+                             available_revision=after, error=explanation)
+                return 0
+
+            # Tests run on an isolated candidate checkout; production stays
+            # online and untouched if code/shell syntax or imports are invalid.
+            update_safety.preflight_candidate(root, state_dir, after)
             previously_running = {unit: service_running(root, unit) for unit in MANAGED_SERVICES}
+            correct, explanation = update_safety.service_paths_correct(root, previously_running)
+            if not correct:
+                raise RuntimeError(explanation)
+            working_cameras = (
+                update_safety.healthy_cameras_before_update()
+                if previously_running.get("personenzaehler.service") else set()
+            )
             exec_checked(
                 ["git", "-C", str(root), "merge", "--ff-only", after], cwd=root, timeout=90,
             )
+            installed_at = time.time()
             try:
-                for name in ("scripts/install_linux_app.sh", "scripts/install_autostart.sh"):
-                    exec_checked(["bash", "-n", str(root / name)], cwd=root, timeout=15)
-                exec_checked(
-                    ["python3", "-m", "compileall", "-q", "src", "scripts"],
-                    cwd=root, timeout=90,
-                )
                 installer(root)
-                check_health(root, previously_running)
+                update_safety.wait_for_recovery(
+                    root, previously_running, working_cameras,
+                    installed_at, service_running,
+                )
             except Exception as exc:
                 log(f"Update fehlgeschlagen ({type(exc).__name__}): {exc}; Rollback starten.")
                 rollback_error: Exception | None = None
@@ -191,7 +208,10 @@ def update(root: Path, *, check_only: bool = False) -> int:
                         ["git", "-C", str(root), "reset", "--hard", before], cwd=root, timeout=90,
                     )
                     installer(root, rollback=True)
-                    check_health(root, previously_running)
+                    update_safety.wait_for_recovery(
+                        root, previously_running, set(), time.time(), service_running,
+                        attempts=30,
+                    )
                 except Exception as restore_exc:
                     rollback_error = restore_exc
                     log(f"Rollback NICHT vollständig: {restore_exc}")
