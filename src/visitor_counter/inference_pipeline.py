@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, RLock, Thread
 from time import monotonic
 from typing import Callable
 
@@ -115,6 +117,14 @@ class ProcessingPipeline(Thread):
         self._live_presence: dict[int, _LivePresenceMemory] = {}
         self._last_persisted_global_counts: tuple[int, int, int, int] | None = None
         self._last_retention_purge_at = 0.0
+        self._state_lock = RLock()
+        self._cache_lock = Lock()
+        self._shared_hailo_lock = Lock()
+        self._shared_reid_lock = Lock()
+        self._hailo_workers = {camera_id: self.hailo for camera_id in config.cameras}
+        self._reid_workers = {camera_id: self.reid for camera_id in config.cameras}
+        self._camera_hailo_stage_ms: dict[str, dict[str, float]] = {}
+        self._camera_hailo_latency_ms: dict[str, float] = {}
 
     def run(self) -> None:
         LOGGER.info("Starting processing pipeline")
@@ -145,6 +155,7 @@ class ProcessingPipeline(Thread):
                 self.runtime_stats.hailo_device = self.hailo.hailo_device
                 self.runtime_stats.backend = self.hailo.backend
                 self.runtime_stats.detector_active = True
+                self._initialize_parallel_engines()
             except (HailoUnavailableError, ModelUnavailableError, FileNotFoundError) as exc:
                 self.runtime_stats.hailo_status = str(exc)
                 self.runtime_stats.detector_error = str(exc)
@@ -155,65 +166,153 @@ class ProcessingPipeline(Thread):
                 self.database.close()
                 return
         frames = 0
-        last_tick = monotonic()
-        while not self.stop_event.is_set():
-            packet = self.input_queue.get_next(
-                self._camera_order,
-                self._last_camera_id,
-                timeout=0.2,
-                max_age_seconds=self._max_frame_age_seconds,
-            )
-            if packet is None:
-                self._run_timeout_check()
-                self._update_queue_stats()
-                self._emit_stats()
-                continue
-            started = monotonic()
-            self._last_camera_id = packet.camera_id
-            stage_ms: dict[str, float] = {
-                "frame_age_at_dequeue_ms": (started - packet.monotonic_time) * 1000.0,
-            }
-            obstruction_start = monotonic()
-            obstruction = self.obstruction_detectors[packet.camera_id].update(
-                packet.image
-            )
-            stage_ms["obstruction_ms"] = (monotonic() - obstruction_start) * 1000.0
-            self.runtime_stats.camera_obstructed[packet.camera_id] = (
-                obstruction.obstructed
-            )
-            self.runtime_stats.camera_obstruction_reason[packet.camera_id] = obstruction.reason
-            detect_start = monotonic()
-            raw_detections = [] if obstruction.obstructed else self._detect(packet)
-            if obstruction.obstructed:
-                self.runtime_stats.camera_inference_status[packet.camera_id] = "obstructed"
-            detections = self._filter_person_detections(
-                raw_detections, packet.width, packet.height
-            )
-            self.runtime_stats.camera_raw_person_detections[packet.camera_id] = len(raw_detections)
-            self.runtime_stats.camera_person_detections[packet.camera_id] = len(detections)
-            self.runtime_stats.camera_detection_confidence[packet.camera_id] = max(
-                (d.confidence for d in detections), default=None
-            )
-            stage_ms["detect_total_ms"] = (monotonic() - detect_start) * 1000.0
-            stage_ms.update(self.hailo.last_stage_ms)
-            self.runtime_stats.camera_inference_latency_ms[packet.camera_id] = (
-                self.hailo.last_latency_ms
-                if self.runtime_stats.camera_inference_status.get(packet.camera_id) == "active"
-                else None
-            )
-            tracker_start = monotonic()
-            tracks = self.trackers[packet.camera_id].update(
-                packet.camera_id, detections
-            )
-            stage_ms["tracker_ms"] = (monotonic() - tracker_start) * 1000.0
-            observed_tracks = self._filter_live_count_tracks(
-                tracks, packet.width, packet.height, confirmed_only=False
-            )
-            countable_tracks = [track for track in observed_tracks if track.confirmed]
-            tentative_tracks = [track for track in observed_tracks if not track.confirmed]
-            reid_start = monotonic()
-            tracks = self._with_reid_embeddings(packet, countable_tracks)
-            stage_ms["osnet_reid_ms"] = (monotonic() - reid_start) * 1000.0
+        tick = monotonic()
+        status_tick = 0.0
+        try:
+            with ThreadPoolExecutor(max_workers=max(1, len(self._camera_order)), thread_name_prefix="inference-camera") as pool:
+                pending: dict[str, Future[None]] = {}
+                while not self.stop_event.is_set():
+                    for camera_id, future in list(pending.items()):
+                        if future.done():
+                            del pending[camera_id]
+                            try:
+                                future.result()
+                            except Exception:
+                                LOGGER.exception("CAMERA_WORKER_FAILED camera=%s", camera_id)
+                                self.stop_event.set()
+                                break
+                            frames += 1
+                    if self.stop_event.is_set():
+                        break
+                    available = [cam for cam in self._camera_order if cam not in pending]
+                    if available:
+                        packet = self.input_queue.get_next(
+                            available, self._last_camera_id, timeout=0.05,
+                            max_age_seconds=self._max_frame_age_seconds,
+                        )
+                        if packet is not None:
+                            if packet.camera_id in available:
+                                self._last_camera_id = packet.camera_id
+                                pending[packet.camera_id] = pool.submit(self._process_packet, packet)
+                            else:
+                                LOGGER.warning("CAMERA_QUEUE_UNEXPECTED camera=%s", packet.camera_id)
+                    elif pending:
+                        wait(tuple(pending.values()), timeout=0.05, return_when=FIRST_COMPLETED)
+                    now = monotonic()
+                    if now - tick >= 1.0:
+                        with self._state_lock:
+                            self.runtime_stats.inference_fps = frames / max(0.001, now - tick)
+                        frames, tick = 0, now
+                    if now - status_tick >= 0.2:
+                        with self._state_lock:
+                            self._run_timeout_check()
+                            self._update_queue_stats()
+                            self._emit_stats()
+                        status_tick = now
+                for camera_id, future in pending.items():
+                    try:
+                        future.result()
+                    except Exception:
+                        LOGGER.exception("CAMERA_WORKER_FAILED_ON_STOP camera=%s", camera_id)
+                with self._state_lock:
+                    self._update_queue_stats()
+                    self._emit_stats()
+        finally:
+            for engine in self._unique_engines(self._hailo_workers):
+                engine.close()
+            for engine in self._unique_engines(self._reid_workers):
+                engine.close()
+            self.database.close()
+            LOGGER.info("Processing pipeline stopped")
+
+    @staticmethod
+    def _unique_engines(engines: dict[str, object]) -> list[object]:
+        return list({id(value): value for value in engines.values()}.values())
+
+    @classmethod
+    def _total_engine_inferences(cls, engines: dict[str, object]) -> int:
+        return sum(value.inference_count for value in cls._unique_engines(engines))
+
+    def _initialize_parallel_engines(self) -> None:
+        if len(self._camera_order) < 2:
+            self.runtime_stats.parallel_inference_mode = "single_camera"
+            return
+        detector_parallel = True
+        reid_parallel = not self.config.model.reid_required
+        for camera_id in self._camera_order[1:]:
+            extra = HailoManager(self.config.model, self.model.hef_path)
+            try:
+                extra.initialize()
+            except Exception as exc:
+                extra.close()
+                detector_parallel = False
+                LOGGER.warning("PARALLEL_HAILO_FALLBACK camera=%s exception=%s", camera_id, type(exc).__name__)
+            else:
+                self._hailo_workers[camera_id] = extra
+            if self.config.model.reid_required:
+                second_reid = OSNetReIDManager(self.config.model, self.project_root)
+                try:
+                    second_reid.initialize()
+                except Exception as exc:
+                    second_reid.close()
+                    LOGGER.warning("PARALLEL_OSNET_FALLBACK camera=%s exception=%s", camera_id, type(exc).__name__)
+                else:
+                    self._reid_workers[camera_id] = second_reid
+        if self.config.model.reid_required:
+            reid_parallel = len(self._unique_engines(self._reid_workers)) == len(self._camera_order)
+        self.runtime_stats.parallel_inference_mode = (
+            "parallel_hailo_and_osnet" if detector_parallel and reid_parallel
+            else "parallel_camera_workers_serialized_shared_models"
+        )
+        LOGGER.info("CAMERA_PIPELINE_MODE %s", self.runtime_stats.parallel_inference_mode)
+
+    def _process_packet(self, packet: FramePacket) -> None:
+        started = monotonic()
+        stage_ms: dict[str, float] = {
+            "frame_age_at_dequeue_ms": (started - packet.monotonic_time) * 1000.0,
+        }
+        obstruction_start = monotonic()
+        obstruction = self.obstruction_detectors[packet.camera_id].update(
+            packet.image
+        )
+        stage_ms["obstruction_ms"] = (monotonic() - obstruction_start) * 1000.0
+        self.runtime_stats.camera_obstructed[packet.camera_id] = (
+            obstruction.obstructed
+        )
+        self.runtime_stats.camera_obstruction_reason[packet.camera_id] = obstruction.reason
+        detect_start = monotonic()
+        raw_detections = [] if obstruction.obstructed else self._detect(packet)
+        if obstruction.obstructed:
+            self.runtime_stats.camera_inference_status[packet.camera_id] = "obstructed"
+        detections = self._filter_person_detections(
+            raw_detections, packet.width, packet.height
+        )
+        self.runtime_stats.camera_raw_person_detections[packet.camera_id] = len(raw_detections)
+        self.runtime_stats.camera_person_detections[packet.camera_id] = len(detections)
+        self.runtime_stats.camera_detection_confidence[packet.camera_id] = max(
+            (d.confidence for d in detections), default=None
+        )
+        stage_ms["detect_total_ms"] = (monotonic() - detect_start) * 1000.0
+        stage_ms.update(self._camera_hailo_stage_ms.get(packet.camera_id, self.hailo.last_stage_ms))
+        self.runtime_stats.camera_inference_latency_ms[packet.camera_id] = (
+            self._camera_hailo_latency_ms.get(packet.camera_id, self.hailo.last_latency_ms)
+            if self.runtime_stats.camera_inference_status.get(packet.camera_id) == "active"
+            else None
+        )
+        tracker_start = monotonic()
+        tracks = self.trackers[packet.camera_id].update(
+            packet.camera_id, detections
+        )
+        stage_ms["tracker_ms"] = (monotonic() - tracker_start) * 1000.0
+        observed_tracks = self._filter_live_count_tracks(
+            tracks, packet.width, packet.height, confirmed_only=False
+        )
+        countable_tracks = [track for track in observed_tracks if track.confirmed]
+        tentative_tracks = [track for track in observed_tracks if not track.confirmed]
+        reid_start = monotonic()
+        tracks = self._with_reid_embeddings(packet, countable_tracks)
+        stage_ms["osnet_reid_ms"] = (monotonic() - reid_start) * 1000.0
+        with self._state_lock:
             identity_start = monotonic()
             tracks = self.identity.update(
                 packet.camera_id,
@@ -287,43 +386,35 @@ class ProcessingPipeline(Thread):
                     self.global_counts.entered,
                     self.global_counts.exited,
                 )
-            draw_start = monotonic()
-            gui_start = monotonic()
-            if (
-                self.frame_callback
-                and gui_start >= self._next_gui_emit_at[packet.camera_id]
-            ):
-                annotated = self._annotate(packet, tracks)
-                self.frame_callback(packet.camera_id, annotated, tracks)
-                self._next_gui_emit_at[packet.camera_id] = (
-                    gui_start + self._gui_interval_seconds
-                )
-            stage_ms["draw_boxes_ms"] = (monotonic() - draw_start) * 1000.0
-            stage_ms["gui_transfer_ms"] = (monotonic() - gui_start) * 1000.0
-            frames += 1
-            now = monotonic()
+        draw_start = monotonic()
+        gui_start = monotonic()
+        if (
+            self.frame_callback
+            and gui_start >= self._next_gui_emit_at[packet.camera_id]
+        ):
+            annotated = self._annotate(packet, tracks)
+            self.frame_callback(packet.camera_id, annotated, tracks)
+            self._next_gui_emit_at[packet.camera_id] = (
+                gui_start + self._gui_interval_seconds
+            )
+        stage_ms["draw_boxes_ms"] = (monotonic() - draw_start) * 1000.0
+        stage_ms["gui_transfer_ms"] = (monotonic() - gui_start) * 1000.0
+
+        now = monotonic()
+        with self._state_lock:
             self.runtime_stats.total_latency_ms = (now - packet.monotonic_time) * 1000.0
             stage_ms["processing_total_ms"] = (now - started) * 1000.0
             stage_ms["end_to_end_ms"] = self.runtime_stats.total_latency_ms
             self.latency_window.add(stage_ms)
             self.runtime_stats.latency = self.latency_window.summaries()
             self.runtime_stats.frame_age_ms = stage_ms["frame_age_at_dequeue_ms"]
-            self.runtime_stats.inference_latency_ms = self.hailo.last_latency_ms
-            self.runtime_stats.hailo_inference_count = self.hailo.inference_count
-            self.runtime_stats.reid_inference_count = self.reid.inference_count
-            self.runtime_stats.reid_latency_ms = self.reid.last_latency_ms
+            self.runtime_stats.inference_latency_ms = self._camera_hailo_latency_ms.get(
+                packet.camera_id, self.hailo.last_latency_ms
+            )
+            self.runtime_stats.hailo_inference_count = self._total_engine_inferences(self._hailo_workers)
+            self.runtime_stats.reid_inference_count = self._total_engine_inferences(self._reid_workers)
+            self.runtime_stats.reid_latency_ms = self._reid_workers[packet.camera_id].last_latency_ms
             self.runtime_stats.reid_cache_size = len(self._reid_cache)
-            self._update_queue_stats()
-            if now - last_tick >= 1.0:
-                self.runtime_stats.inference_fps = frames / (now - last_tick)
-                frames = 0
-                last_tick = now
-            self._run_timeout_check()
-            self._emit_stats()
-        self.hailo.close()
-        self.reid.close()
-        self.database.close()
-        LOGGER.info("Processing pipeline stopped")
 
     def _with_reid_embeddings(
         self, packet: FramePacket, tracks: list[TrackedObject]
