@@ -133,6 +133,7 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.hailo_status = "paused"
             self.runtime_stats.reid_status = "OSNet paused (YOLO disabled)"
             LOGGER.info("YOLO detection paused by user; camera status stays available")
+            self.runtime_stats.parallel_inference_mode = "parallel_camera_workers_no_detector"
         else:
             try:
                 model_status = self.model.require_available()
@@ -419,32 +420,39 @@ class ProcessingPipeline(Thread):
     def _with_reid_embeddings(
         self, packet: FramePacket, tracks: list[TrackedObject]
     ) -> list[TrackedObject]:
-        if not self.config.model.reid_required or not self.reid.ready:
+        manager = self._reid_workers.get(packet.camera_id, self.reid)
+        if not self.config.model.reid_required or not manager.ready:
             return tracks
         now = monotonic()
         updated: list[TrackedObject] = []
         interval = max(0.1, self.config.identity.reid_update_interval_seconds)
         ttl = max(interval, self.config.identity.cache_ttl_seconds)
-        for key, (seen_at, _embedding) in list(self._reid_cache.items()):
-            if now - seen_at > ttl:
-                del self._reid_cache[key]
+        with self._cache_lock:
+            for key, (seen_at, _) in list(self._reid_cache.items()):
+                if now - seen_at > ttl:
+                    self._reid_cache.pop(key, None)
+        shared = sum(value is manager for value in self._reid_workers.values()) > 1
         for track in tracks:
             if not track.confirmed or track.lost_frames != 0:
                 updated.append(track)
                 continue
             key = (packet.camera_id, track.track_id)
-            cached = self._reid_cache.get(key)
+            with self._cache_lock:
+                cached = self._reid_cache.get(key)
             if cached and now - cached[0] < interval:
-                self.reid.cache_hits += 1
-                updated.append(
-                    replace(track, embedding=cached[1], last_reid_at=cached[0])
-                )
+                with self._shared_reid_lock if shared else nullcontext():
+                    manager.cache_hits += 1
+                updated.append(replace(track, embedding=cached[1], last_reid_at=cached[0]))
                 continue
-            embedding = self.reid.infer_embedding(packet.image, track.bbox)
+            # Per-camera contexts execute in parallel. Only a shared fallback
+            # OSNet context is protected from concurrent HailoRT calls.
+            with self._shared_reid_lock if shared else nullcontext():
+                embedding = manager.infer_embedding(packet.image, track.bbox)
             if embedding is None:
                 updated.append(track)
                 continue
-            self._reid_cache[key] = (now, embedding)
+            with self._cache_lock:
+                self._reid_cache[key] = (now, embedding)
             updated.append(replace(track, embedding=embedding, last_reid_at=now))
         return updated
 
@@ -621,7 +629,14 @@ class ProcessingPipeline(Thread):
             self.runtime_stats.detector_error = self.hailo.status
             return []
         try:
-            detections = self.hailo.infer(packet.image)
+            manager = self._hailo_workers.get(packet.camera_id, self.hailo)
+            shared = sum(value is manager for value in self._hailo_workers.values()) > 1
+            # A separate HailoRT context per camera is preferred. A hardware
+            # allocation failure falls back to serial calls on the shared one.
+            with self._shared_hailo_lock if shared else nullcontext():
+                detections = manager.infer(packet.image)
+                self._camera_hailo_stage_ms[packet.camera_id] = dict(manager.last_stage_ms)
+                self._camera_hailo_latency_ms[packet.camera_id] = manager.last_latency_ms
             self.runtime_stats.camera_inference_status[packet.camera_id] = "active"
             self.runtime_stats.camera_ai_processed_frames[packet.camera_id] = (
                 self.runtime_stats.camera_ai_processed_frames.get(packet.camera_id, 0) + 1
@@ -644,7 +659,7 @@ class ProcessingPipeline(Thread):
                 if detection.class_id == 0 and detection.label == "person"
             ]
             self.runtime_stats.inference_latency_ms = self.hailo.last_latency_ms
-            self.runtime_stats.hailo_inference_count = self.hailo.inference_count
+            self.runtime_stats.hailo_inference_count = self._total_engine_inferences(self._hailo_workers)
             if detections:
                 self.runtime_stats.last_detection_at = packet.captured_at
 
