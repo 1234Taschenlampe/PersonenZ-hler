@@ -665,10 +665,15 @@ class ProcessingPipeline(Thread):
                     self._camera_hailo_stage_ms[packet.camera_id] = dict(self.hailo.last_stage_ms)
                     self._camera_hailo_latency_ms[packet.camera_id] = self.hailo.last_latency_ms
             self.runtime_stats.camera_inference_status[packet.camera_id] = "active"
-            self.runtime_stats.camera_ai_processed_frames[packet.camera_id] = (
-                self.runtime_stats.camera_ai_processed_frames.get(packet.camera_id, 0) + 1
-            )
-            self._camera_ai_ticks.setdefault(packet.camera_id, deque(maxlen=120)).append(monotonic())
+            # The coordinator iterates these ticks for per-camera FPS.
+            # Guard first insertion as well as append against concurrent reads.
+            with self._state_lock:
+                self.runtime_stats.camera_ai_processed_frames[packet.camera_id] = (
+                    self.runtime_stats.camera_ai_processed_frames.get(packet.camera_id, 0) + 1
+                )
+                self._camera_ai_ticks.setdefault(
+                    packet.camera_id, deque(maxlen=120)
+                ).append(monotonic())
             self.runtime_stats.detector_active = True
             self.runtime_stats.detector_error = ""
             detections = [
