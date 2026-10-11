@@ -145,7 +145,7 @@ Environment="XDG_CACHE_HOME=$cache_base"
 Environment=DEBIAN_FRONTEND=noninteractive
 Environment=GIT_TERMINAL_PROMPT=0
 ExecStart=/usr/bin/python3 $PWD/scripts/auto_update.py --project-root $PWD
-TimeoutStartSec=30min
+TimeoutStartSec=60min
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
