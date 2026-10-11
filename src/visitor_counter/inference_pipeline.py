@@ -438,7 +438,7 @@ class ProcessingPipeline(Thread):
             for key, (seen_at, _) in list(self._reid_cache.items()):
                 if now - seen_at > ttl:
                     self._reid_cache.pop(key, None)
-        shared = sum(value is manager for value in self._reid_workers.values()) > 1
+        shared = manager is self.reid or sum(value is manager for value in self._reid_workers.values()) > 1
         for track in tracks:
             if not track.confirmed or track.lost_frames != 0:
                 updated.append(track)
@@ -640,7 +640,7 @@ class ProcessingPipeline(Thread):
             return []
         try:
             manager = self._hailo_workers.get(packet.camera_id, self.hailo)
-            shared = sum(value is manager for value in self._hailo_workers.values()) > 1
+            shared = manager is self.hailo or sum(value is manager for value in self._hailo_workers.values()) > 1
             # A separate HailoRT context per camera is preferred. A hardware
             # allocation failure falls back to serial calls on the shared one.
             try:
