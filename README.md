@@ -49,6 +49,20 @@ Für Installation und normalen Betrieb sind keine Python-, Shell- oder `systemct
 
 HailoRT und die Firmware sind hardwarespezifische Herstellerkomponenten. Die Anwendung erkennt fehlende Komponenten und meldet **KI-Beschleuniger nicht bereit**; sie startet keinen versteckten CPU-, Dummy- oder Ersatzmodellpfad. Die beiden produktiven HEF-Dateien werden über **KI & Hardware** importiert.
 
+## Automatische GitHub-Updates
+
+Nach der einmaligen Installation prüft ein **systemd-Benutzer-Timer** das
+freigegebene `main`-Repository ungefähr alle sechs Stunden auf neue Commits.
+Updates werden nur bei sauberem, unverändertem Quellcode per Fast-Forward
+installiert. Der Installer übernimmt fehlende Laufzeit-Abhängigkeiten und
+aktiviert bereits laufende Zähl-, API- und GUI-Dienste erneut. Der letzte
+Status steht unter `~/.local/state/personenzaehler/auto-update-status.json`.
+
+Zum Schutz laufender Vorführungen lassen sich Updates jederzeit mit
+`touch ~/.config/personenzaehler/auto-update.paused` aussetzen; danach
+die Datei zum Fortsetzen wieder löschen. Einzelheiten, Prüf- und
+Rollback-Verhalten: [Automatische Updates](docs/AUTOMATIC_UPDATES.md).
+
 ## Funktionsumfang
 
 - moderne native PySide6-Oberfläche mit Sidebar, Cards, Light/Dark Mode und Hintergrund-Workern
