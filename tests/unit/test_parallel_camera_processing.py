@@ -203,3 +203,71 @@ def test_secondary_hailo_runtime_error_falls_back_to_primary_context():
     assert pipeline.runtime_stats.parallel_inference_mode == (
         "parallel_camera_workers_serialized_shared_models"
     )
+
+def test_two_camera_tracks_both_reach_production_counts(tmp_path):
+    from visitor_counter.enhanced_counting import EnhancedProcessingPipeline
+    from visitor_counter.types import BoundingBox, Detection
+
+    config = AppConfig()
+    config.model.detector_enabled = False
+    config.model.reid_required = False
+    config.database.encryption_required = False
+    config.database.store_events = False
+    config.database.path = str(tmp_path / "two-cameras.sqlite")
+    config.tracking.min_confirmed_hits = 3
+    config.tracking.min_confirmed_track_hits = 2
+    config.tracking.min_stable_zone_frames = 1
+    config.tracking.zone_hysteresis_pixels = 0
+    for camera in config.cameras.values():
+        camera.width = camera.height = 200
+        camera.line_start, camera.line_end = (0, 100), (200, 100)
+        camera.counting_mode = "line"
+        camera.entry_direction, camera.exit_direction = "A_to_B", "B_to_A"
+
+    stopped = Event()
+    frame = np.zeros((200, 200, 3), dtype=np.uint8)
+    remaining = deque(
+        FramePacket.from_image(camera_id, i, frame.copy(), time())
+        for i in range(1, 4)
+        for camera_id in ("camera_1", "camera_2")
+    )
+    dispatch_lock = Lock()
+
+    class Hub:
+        maxsize = 2
+
+        def get_next(self, camera_order, *_args, **_kwargs):
+            with dispatch_lock:
+                for index, packet in enumerate(remaining):
+                    if packet.camera_id in camera_order:
+                        del remaining[index]
+                        return packet
+                if not remaining:
+                    stopped.set()
+            return None
+
+        def qsize(self):
+            return len(remaining)
+
+        def dropped_counts(self):
+            return {}
+
+    pipeline = EnhancedProcessingPipeline(config, tmp_path, Hub(), stopped)
+    for camera_id in config.cameras:
+        pipeline.obstruction_detectors[camera_id] = SimpleNamespace(
+            update=lambda _image: SimpleNamespace(obstructed=False, reason="clear")
+        )
+    pipeline._detect = lambda packet: [
+        Detection(
+            BoundingBox(75, 30 if packet.frame_id == 1 else 70,
+                        115, 130 if packet.frame_id == 1 else 170), 0.9
+        )
+    ]
+    pipeline.run()
+    assert pipeline.runtime_stats.camera_processed_frames == {
+        "camera_1": 3, "camera_2": 3
+    }
+    assert pipeline.counters["camera_1"].counts.entered == 1
+    assert pipeline.counters["camera_2"].counts.entered == 1
+    assert pipeline.global_counts.entered == 2
+    assert pipeline.global_counts.inside == 2
