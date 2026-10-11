@@ -102,8 +102,10 @@ def installer(root: Path, *, rollback: bool = False) -> None:
         "GIT_TERMINAL_PROMPT": "0",
     })
     args = ["bash", str(root / "scripts" / "install_linux_app.sh")]
+    # Revalidate existing models even for rollback: --skip-models deliberately
+    # exits with partial-install status and would misreport a healthy restore.
     if rollback:
-        args.append("--skip-models")
+        log("Vorherige Version und bestehende Modelle wiederherstellen.")
     exec_checked(args, cwd=root, env=env, timeout=1200)
 
 
