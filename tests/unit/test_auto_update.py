@@ -35,6 +35,7 @@ def auto_env(tmp_path, monkeypatch):
     monkeypatch.setattr(updater.update_safety, "service_paths_correct",
                         lambda *_args: (True, "ok"))
     monkeypatch.setattr(updater.update_safety, "healthy_cameras_before_update", lambda: set())
+    monkeypatch.setattr(updater.time, "localtime", lambda: SimpleNamespace(tm_hour=3))
     return root
 
 
