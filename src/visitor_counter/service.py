@@ -213,6 +213,7 @@ class VisitorCounterService:
                 **read_host_metrics(),
                 "latency": {k: {"mean_ms": v.mean_ms, "p95_ms": v.p95_ms} for k, v in stats.latency.items()},
                 "inference_fps": round(stats.inference_fps, 1),
+                "parallel_inference_mode": stats.parallel_inference_mode,
                 "detector_enabled": self.config.model.detector_enabled,
                 "detector_active": stats.detector_active,
                 "reid_enabled": self.config.model.reid_required,
