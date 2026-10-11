@@ -117,7 +117,12 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
       apt_run=( )
     else
       command -v sudo >/dev/null || fail "sudo wird nur für fehlende Systempakete benötigt."
-      sudo -v || fail "sudo-Berechtigung für Paketinstallation fehlt."
+      if [[ "${PERSONENZAEHLER_UNATTENDED:-0}" == 1 ]]; then
+        # Automatic updates must never wait for an interactive password.
+        sudo -n -v || fail "Unbeaufsichtigtes Update benötigt manuelle sudo-Freigabe für fehlende Systempakete."
+      else
+        sudo -v || fail "sudo-Berechtigung für Paketinstallation fehlt."
+      fi
       apt_run=(sudo)
     fi
     now="$(date +%s)"
