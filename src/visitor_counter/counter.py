@@ -39,6 +39,10 @@ class _TrackMemory:
     observed_positions: list[tuple[float, float]] = field(default_factory=list)
     exit_edge_side: str | None = None
     edge_exit_checked: bool = False
+    # Raw observations preserve genuine side changes when a short passage
+    # cannot satisfy the separate stable-zone debounce used by line mode.
+    last_observed_zone: str | None = None
+    observed_crossing_directions: set[str] = field(default_factory=set)
 
 
 class LineCrossingCounter:
@@ -162,6 +166,15 @@ class LineCrossingCounter:
                     camera_num,
                     track.confirmed,
                 )
+
+            # Edge confirmation must never infer a passage solely from motion
+            # toward the image border. Require an observed A/B side change.
+            if raw_zone in ("A", "B"):
+                if memory.last_observed_zone in ("A", "B") and memory.last_observed_zone != raw_zone:
+                    memory.observed_crossing_directions.add(
+                        f"{memory.last_observed_zone}_to_{raw_zone}"
+                    )
+                memory.last_observed_zone = raw_zone
 
             memory.previous_center = anchor
             memory.observed_positions.append(point)
@@ -313,7 +326,11 @@ class LineCrossingCounter:
         destination = "B" if movement > 0 else "A"
         if destination != memory.exit_edge_side:
             return None
-        return "A_to_B" if destination == "B" else "B_to_A"
+        transition = "A_to_B" if destination == "B" else "B_to_A"
+        if (transition not in memory.observed_crossing_directions
+                or memory.last_observed_zone != destination):
+            return None
+        return transition
 
     def _process_transition(
         self, track: TrackedObject, memory: _TrackMemory, frame_id: int,
