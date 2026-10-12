@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from time import time
 from typing import Any
@@ -12,6 +12,7 @@ from .configuration import AppConfig, load_config, privacy_readiness_errors
 from .data_protection import load_data_protector
 from .database import EventDatabase
 from .license_service import LicenseService, LicenseStatus
+from .live_person_count import LivePersonCount, live_person_count
 from .runtime_paths import RuntimePaths
 from .service_manager import ServiceManager, ServiceStatus
 
@@ -27,6 +28,7 @@ class DashboardSnapshot:
     service: ServiceStatus | None = None
     license: LicenseStatus | None = None
     privacy_errors: tuple[str, ...] = ()
+    live_people: LivePersonCount | None = None
 
 
 class ApplicationService:
@@ -48,18 +50,26 @@ class ApplicationService:
     def snapshot(self) -> DashboardSnapshot:
         config = self.config()
         live = self._read_live_status()
-        counts = dict(live.get("counts", {})) if live else self._database_counts(config)
-        counts.setdefault("inside", 0)
-        counts.setdefault("entered", 0)
-        counts.setdefault("exited", 0)
-        counts.setdefault(
-            "throughput",
-            int(counts.get("entered") or 0) + int(counts.get("exited") or 0),
+        # The stored occupancy ledger is authoritative, not visible tracks or a
+        # reconstruction from lifetime entries minus exits (which loses offsets).
+        counts = self._database_counts(config)
+        for key in ("inside", "entered", "exited", "wrong_way"):
+            counts.setdefault(key, None)
+        counts["throughput"] = (
+            counts["entered"] + counts["exited"]
+            if counts["entered"] is not None and counts["exited"] is not None else None
         )
-        counts.setdefault("daily_unique", self._daily_unique_count())
-        counts.setdefault("suppressed", 0)
-        counts.setdefault("uncertain", 0)
-        counts.setdefault("wrong_way", 0)
+        counts["occupancy_adjustment"] = (
+            counts["inside"] - counts["entered"] + counts["exited"]
+            if all(counts[key] is not None for key in ("inside", "entered", "exited")) else None
+        )
+        counts["daily_unique"] = self._daily_unique_count()
+        counts.update(self._today_passages(config))
+        for key in ("suppressed", "uncertain"):
+            counts[key] = live.get("counts", {}).get(key) if live else None
+        counts["daily_unique_degraded"] = (
+            live.get("counts", {}).get("daily_unique_degraded", True) if live else True
+        )
         cameras = (
             list(live.get("cameras", []))
             if live
@@ -99,7 +109,12 @@ class ApplicationService:
             service=self.service_manager.status(),
             license=self.license_service.inspect(),
             privacy_errors=tuple(privacy_readiness_errors(config)),
+            live_people=live_person_count(live),
         )
+
+    def live_people(self) -> LivePersonCount:
+        """Fast read path: no database, subprocess, licence check or camera capture."""
+        return live_person_count(self._read_live_status())
 
     def recent_events(self, limit: int = 100) -> list[dict[str, Any]]:
         config = self.config()
@@ -146,7 +161,7 @@ class ApplicationService:
         for timestamp, direction, count in rows:
             index = int(float(timestamp) // 3600) - first
             if 0 <= index < len(result):
-                key = "entries" if direction == "IN" else "exits"
+                key = "entries" if str(direction).lower() == "in" else "exits"
                 result[index][key] += int(count)
         return result
 
@@ -180,6 +195,8 @@ class ApplicationService:
             payload = json.loads(
                 self.paths.live_status_file.read_text(encoding="utf-8")
             )
+            if not isinstance(payload, dict):
+                return None
             if time() - float(payload.get("timestamp", 0)) > 15:
                 return None
             return payload if isinstance(payload, dict) else None
@@ -224,6 +241,30 @@ class ApplicationService:
             "suppressed": int(suppressed),
             "uncertain": int(uncertain),
         }
+
+    def _today_passages(self, config: AppConfig) -> dict[str, int | None]:
+        unavailable = {"today_entered": None, "today_exited": None}
+        # With personal event storage disabled the lifetime totals contain no
+        # date information. Do not silently relabel them as today's passages.
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        if (not config.database.store_events or
+                config.database.retention_hours * 3600 < time() - midnight.timestamp()):
+            return unavailable
+        path = self._database_path(config)
+        if not path.exists():
+            return unavailable
+        try:
+            with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2) as connection:
+                row = connection.execute(
+                    "SELECT SUM(CASE WHEN lower(direction)='in' THEN 1 ELSE 0 END), "
+                    "SUM(CASE WHEN lower(direction)='out' THEN 1 ELSE 0 END) "
+                    "FROM counting_events WHERE counted=1 AND uncertain=0 "
+                    "AND timestamp>=? AND timestamp<?",
+                    (midnight.timestamp(), (midnight + timedelta(days=1)).timestamp()),
+                ).fetchone()
+            return {"today_entered": int(row[0] or 0), "today_exited": int(row[1] or 0)}
+        except sqlite3.Error:
+            return unavailable
 
     def _daily_unique_count(self) -> int:
         path = self._database_path(self.config()).parent / "daily_unique.sqlite3"

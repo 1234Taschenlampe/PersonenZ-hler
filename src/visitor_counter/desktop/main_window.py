@@ -80,6 +80,11 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(3000)
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
+        self.live_people_timer = QTimer(self)
+        self.live_people_timer.setInterval(400)
+        self.live_people_timer.timeout.connect(self._refresh_live_people)
+        self.live_people_timer.start()
+        self._refresh_live_people()
         if (
             show_wizard
             and not paths.first_run_marker.exists()
@@ -192,6 +197,9 @@ class MainWindow(QMainWindow):
                 "full_frame" if config.privacy.video_stream_enabled else "none"
             ),
         })
+
+    def _refresh_live_people(self) -> None:
+        self.pages["Übersicht"].update_live_people(self.application_service.live_people())
 
     def _select_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
@@ -616,6 +624,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.timer.stop()
+        self.live_people_timer.stop()
         overview: OverviewPage = self.pages["Übersicht"]  # type: ignore[assignment]
         overview.preview_panel.shutdown()
         self.thread_pool.waitForDone(5000)

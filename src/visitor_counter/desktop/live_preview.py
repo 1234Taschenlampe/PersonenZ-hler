@@ -14,6 +14,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
+from ..live_person_count import LivePersonCount
 
 from ..video_stream import local_preview_directory
 from .components import Card
@@ -136,6 +137,9 @@ class _PreviewTile(Card):
         heading.addWidget(live)
         heading.addWidget(enlarge)
         layout.addLayout(heading)
+        self.live_people_label = QLabel("Aktuell von KI erkannt: Nicht verfügbar")
+        self.live_people_label.setStyleSheet("font-weight:600;")
+        layout.addWidget(self.live_people_label)
         self.image = _ClickableImage("Livebild wird geladen …")
         self.image.setAlignment(Qt.AlignCenter)
         self.image.setMinimumHeight(180)
@@ -163,7 +167,7 @@ class _PreviewTile(Card):
             f"{width} × {height} · {fps_text} Bilder/s\n"
             f"Frames: {camera.get('frames_received', camera.get('frame_count', '?'))} empfangen / "
             f"{camera.get('frames_processed', '?')} KI · "
-            f"Personen: {camera.get('detections', '?')} · Tracks: {camera.get('confirmed_tracks', '?')}\n"
+            f"Gefilterte Erkennungen: {camera.get('detections', '?')} · Tracks: {camera.get('confirmed_tracks', '?')}\n"
             f"Hailo: {camera.get('inference_status', '?')} · "
             f"{camera.get('inference_latency_ms', '?')} ms · ReID: {camera.get('reid_status', '?')}\n"
             f"Eintritte: {camera.get('entered', 0)} · Austritte: {camera.get('exited', 0)} · "
@@ -233,6 +237,13 @@ class CameraPreviewPanel(QWidget):
         self.update_cameras(self._latest_cameras, self._latest_sources)
     def set_project_root(self, project_root: Path) -> None:
         self._project_root = project_root
+
+    def update_live_people(self, live: LivePersonCount) -> None:
+        for camera_id, tile in self._tiles.items():
+            value = live.cameras.get(camera_id)
+            tile.live_people_label.setText(
+                f"Aktuell von KI erkannt: {value if value is not None else 'Nicht verfügbar'}"
+            )
 
     def set_active(self, active: bool) -> None:
         if self._active == active:

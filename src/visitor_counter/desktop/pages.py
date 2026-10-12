@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from ..application_service import DashboardSnapshot
 from ..configuration import AppConfig
 from ..license_service import LicenseStatus
+from ..live_person_count import LivePersonCount
 from ..network_camera_discovery import RtspCandidate, reolink_rtsp_url
 from .components import Card, HistoryChart, MetricCard, PageHeader, StatusBadge
 from .live_preview import CameraPreviewPanel
@@ -52,13 +53,18 @@ class OverviewPage(BasePage):
         )
         grid = QGridLayout()
         grid.setSpacing(12)
+        self.live_people_metric = MetricCard(
+            "Aktuell von KI erkannt", "Nicht verfügbar",
+            "YOLO-Erkennungen in den Kamerabildern; unabhängig vom Belegungsstand.",
+        )
+        self.layout.addWidget(self.live_people_metric)
         definitions = [
             ("inside", "Aktuell im Gebäude"),
-            ("daily_unique", "Besucher heute"),
-            ("entered", "Eintritte"),
-            ("exited", "Austritte"),
-            ("throughput", "Gesamtdurchfluss"),
-            ("suppressed", "Doppelzählungen verhindert"),
+            ("daily_unique", "Besucher heute (Re-ID)"),
+            ("entered", "Eintritte gesamt"),
+            ("exited", "Austritte gesamt"),
+            ("throughput", "Durchgänge gesamt"),
+            ("suppressed", "Unterdrückte Zählversuche"),
             ("uncertain", "Unsichere Ereignisse"),
             ("wrong_way", "Fehlrichtungen"),
         ]
@@ -118,7 +124,35 @@ class OverviewPage(BasePage):
 
     def update_snapshot(self, snapshot: DashboardSnapshot) -> None:
         for key, card in self.metrics.items():
-            card.set_value(snapshot.counts.get(key, 0))
+            value = snapshot.counts.get(key)
+            card.set_value("Nicht verfügbar" if value is None else value)
+        self.metrics["inside"].detail_label.setText(
+            "Gespeicherter Belegungsstand aus bestätigten Ein- und Austritten; keine Live-Erkennung."
+        )
+        adjustment = snapshot.counts.get("occupancy_adjustment")
+        self.metrics["inside"].setToolTip(
+            "Die gespeicherte Belegung wird beibehalten. Ein Anfangsstand, frühere Korrekturen "
+            "oder Austritte bei Belegung 0 können eine Differenz zu den Gesamtzahlen erklären. "
+            + (f"Aktuelle rechnerische Differenz: {adjustment:+d}. " if isinstance(adjustment, int) else "")
+            + "Die Ursache lässt sich ohne vollständige Ereignishistorie nicht rekonstruieren."
+        )
+        for key in ("entered", "exited"):
+            today = snapshot.counts.get("today_" + key)
+            self.metrics[key].detail_label.setText(
+                f"Heute: {today} bestätigte Passagen" if today is not None
+                else "Gespeicherter Gesamtwert; heutiger Anteil nicht rekonstruierbar."
+            )
+        self.metrics["throughput"].detail_label.setText("Gesamte Eintritte + gesamte Austritte")
+        self.metrics["daily_unique"].detail_label.setText(
+            "Tagesprofile als Schätzung; Re-ID derzeit eingeschränkt."
+            if snapshot.counts.get("daily_unique_degraded", True)
+            else "Heute zugeordnete Tagesprofile; Re-ID ist keine garantierte Personenidentität."
+        )
+        for key in ("suppressed", "uncertain"):
+            self.metrics[key].detail_label.setText("Diagnosewert des Zähldienstes; ohne Ereignisspeicherung nicht dauerhaft.")
+        self.metrics["wrong_way"].detail_label.setText("Gespeicherte bestätigte Fehlrichtungen")
+        if snapshot.live_people is not None:
+            self.update_live_people(snapshot.live_people)
         runtime = snapshot.runtime
         self.hardware_info.setText(
             f"Temperatur: {runtime.get('temperature_c', '—')} °C · "
@@ -202,6 +236,17 @@ class OverviewPage(BasePage):
             .astimezone()
             .strftime("%H:%M:%S")
         )
+
+    def update_live_people(self, live: LivePersonCount) -> None:
+        per_camera = " · ".join(
+            f"{live.names[key]}: {value if value is not None else 'Nicht verfügbar'}"
+            for key, value in live.cameras.items()
+        ) or "Keine frischen KI-Messwerte."
+        self.live_people_metric.set_value(
+            live.total if live.total is not None else "Nicht verfügbar",
+            per_camera + "\nSumme der Kameraerkennungen: dieselbe Person kann in beiden Kameras doppelt enthalten sein.",
+        )
+        self.preview_panel.update_live_people(live)
 
 
 class CamerasPage(BasePage):
