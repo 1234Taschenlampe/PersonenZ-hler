@@ -105,12 +105,14 @@ def test_installer_dry_run_is_non_mutating(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux systemd unit tests")
-def test_service_units_do_not_reload_without_changes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("custom_xdg", [False, True])
+def test_service_units_do_not_reload_without_changes(tmp_path: Path, custom_xdg: bool) -> None:
     home = tmp_path / "home"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     home.mkdir()
-    config = home / ".config" / "personenzaehler"
+    config_base = tmp_path / "custom-config" if custom_xdg else home / ".config"
+    config = config_base / "personenzaehler"
     config.mkdir(parents=True)
     (config / "config.yaml").write_text("cameras: {}\n")
     (config / "api.env").write_text("# fixture\n")
@@ -127,6 +129,10 @@ def test_service_units_do_not_reload_without_changes(tmp_path: Path) -> None:
     env = dict(os.environ)
     env.update({
         "HOME": str(home),
+        "XDG_CONFIG_HOME": str(config_base),
+        "XDG_DATA_HOME": str(tmp_path / "data-home"),
+        "XDG_STATE_HOME": str(tmp_path / "state-home"),
+        "XDG_CACHE_HOME": str(tmp_path / "cache-home"),
         "MOCK_LOG": str(log),
         "PATH": str(bin_dir) + os.pathsep + env["PATH"],
         "PERSONENZAEHLER_USE_XDG": "1",
@@ -147,12 +153,14 @@ def test_service_units_do_not_reload_without_changes(tmp_path: Path) -> None:
             assert sum("daemon-reload" in line for line in recorded) == 1
             assert sum("restart personenzaehler" in line for line in recorded) == first_restart_count
             assert "daemon-reload übersprungen" in result.stdout
-    unit = (home / ".config/systemd/user/personenzaehler.service").read_text()
+    unit = (config_base / "systemd/user/personenzaehler.service").read_text()
     assert "ExecCondition=" in unit
+    assert (config_base / "autostart/personenzaehler.desktop").is_file()
+    assert (config_base / "systemd/user/personenzaehler-camera-address.timer").is_file()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="bash is required")
 def test_install_scripts_bash_syntax() -> None:
-    for script in ["quick_install.sh", "install_linux_app.sh", "install_autostart.sh", "install_desktop_icon.sh"]:
-        result = subprocess.run(["bash", "-n", str(ROOT / "scripts" / script)])
-        assert result.returncode == 0, script
+    for script in (ROOT / "scripts").glob("*.sh"):
+        result = subprocess.run(["bash", "-n", str(script)])
+        assert result.returncode == 0, script.name

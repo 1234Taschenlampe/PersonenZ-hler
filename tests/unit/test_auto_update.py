@@ -160,7 +160,7 @@ def test_updater_timer_is_configured_by_source_installer():
     assert "OnBootSec=15min" in script
     assert "OnCalendar=*-*-* 03,09,15,21:00:00" in script
     assert "Persistent=true" in script
-    assert "ExecStart=/usr/bin/python3 $PWD/scripts/auto_update.py" in script
+    assert "ExecStart=/usr/bin/python3 $PWD/scripts/auto_update.py" in script.replace('"', '')
 
 def test_failing_ci_does_not_change_running_installation(auto_env, monkeypatch):
     state = _stub_git(auto_env, monkeypatch)
