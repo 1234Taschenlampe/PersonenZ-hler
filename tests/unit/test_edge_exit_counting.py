@@ -104,3 +104,30 @@ def test_unconfirmed_track_cannot_count() -> None:
         assert counter.update(i, [track], (200, 200)) == []
     for frame_id in range(7, 12):
         assert counter.update(frame_id, [], (200, 200)) == []
+
+
+
+def test_skipped_capture_ids_do_not_accelerate_edge_disappearance() -> None:
+    counter = make_counter()
+    for frame_id, y in enumerate([35, 55, 78, 105, 135, 170, 190], 1):
+        assert counter.update(frame_id, [observed_track(y)], (200, 200)) == []
+
+    # Frames 8..999 were dropped by the latest-frame hub, not processed by AI.
+    # A single later processed frame must not represent hundreds of misses.
+    assert counter.update(1000, [], (200, 200)) == []
+    assert 1 in counter._tracks  # noqa: SLF001 - regression of track expiry
+    assert counter.update(2000, [], (200, 200)) == []
+    events = counter.update(3000, [], (200, 200))
+    assert len(events) == 1
+    assert events[0].direction is Direction.IN
+    assert counter.counts.entered == 1
+    assert counter.update(4000, [], (200, 200)) == []
+
+
+def test_reset_resets_disappearance_processing_clock() -> None:
+    counter = make_counter()
+    for frame_id, y in enumerate([35, 55, 78, 105, 135, 170, 190], 1):
+        counter.update(frame_id, [observed_track(y)], (200, 200))
+    counter.reset()
+    assert counter.update(10000, [], (200, 200)) == []
+    assert counter.counts.entered == 0
