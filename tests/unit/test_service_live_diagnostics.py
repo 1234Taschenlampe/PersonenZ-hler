@@ -28,7 +28,8 @@ def test_service_reports_received_and_processed_frames_and_rejections(tmp_path, 
                          camera_person_detections={"camera_1": 1},
                          camera_confirmed_tracks={"camera_1": 1},
                          camera_inference_latency_ms={"camera_1": 14.5},
-                         hailo_status="active", reid_status="active")
+                         hailo_status="active", reid_status="active",
+                         last_detection_at=10.0, last_count_event_at=7.0)
     monkeypatch.setattr("visitor_counter.service.read_host_metrics", lambda: {"temperature_c": 52.0})
     service._on_stats(stats, GlobalCounts())
     payload = json.loads(service.live_status_path.read_text())
@@ -45,6 +46,7 @@ def test_service_reports_received_and_processed_frames_and_rejections(tmp_path, 
     assert camera["inference_latency_ms"] == 14.5
     assert camera["last_rejection_reason"] == "track not confirmed"
     assert payload["counts"]["entered"] == 0
+    assert payload["counts"]["last_event_time"] == 7.0  # not last detection
     assert payload["runtime"]["temperature_c"] == 52.0
 
 
