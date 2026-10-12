@@ -387,6 +387,8 @@ class EnhancedProcessingPipeline(ProcessingPipeline):
         elif event.direction is Direction.OUT:
             self.global_counts.exited += 1
             self.global_counts.inside = max(0, self.global_counts.inside - 1)
+        if event.direction in (Direction.IN, Direction.OUT):
+            self.runtime_stats.last_count_event_at = event.timestamp
         self._persist_global_counts()
         LOGGER.info(
             "PRODUCTION_COUNTER inside=%s unique_today=%s entries=%s exits=%s throughput=%s",
