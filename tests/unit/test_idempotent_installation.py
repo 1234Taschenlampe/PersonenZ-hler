@@ -153,6 +153,6 @@ def test_service_units_do_not_reload_without_changes(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(sys.platform != "linux", reason="bash is required")
 def test_install_scripts_bash_syntax() -> None:
-    for script in ["quick_install.sh", "install_linux_app.sh", "install_autostart.sh", "install_desktop_icon.sh"]:
-        result = subprocess.run(["bash", "-n", str(ROOT / "scripts" / script)])
-        assert result.returncode == 0, script
+    for script in (ROOT / "scripts").glob("*.sh"):
+        result = subprocess.run(["bash", "-n", str(script)])
+        assert result.returncode == 0, script.name

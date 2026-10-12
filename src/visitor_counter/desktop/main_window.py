@@ -643,5 +643,8 @@ def run_desktop(paths: RuntimePaths, *, show_wizard: bool = True) -> int:
     dark = QSettings("PersonenZaehler", "Desktop").value("darkMode", False, bool)
     apply_theme(app, dark)
     window = MainWindow(paths, show_wizard=show_wizard)
-    window.show()
+    if os.environ.get("PERSONENZAEHLER_GUI_MAXIMIZED") == "1":
+        window.showMaximized()
+    else:
+        window.show()
     return app.exec() if owns_app else 0

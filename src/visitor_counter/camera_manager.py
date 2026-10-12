@@ -8,7 +8,7 @@ import subprocess
 from threading import Condition, Event, Thread
 from time import monotonic, time
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import cv2
 
@@ -17,6 +17,31 @@ from .types import CameraStats, FramePacket
 
 LOGGER = logging.getLogger(__name__)
 FramePacketCallback = Callable[[FramePacket], None]
+
+
+class CameraCredentialError(ValueError):
+    """Missing credentials; the exception deliberately never includes values."""
+
+
+def camera_source_with_credentials(source: str, config: CameraConfig,
+                                   environ: dict[str, str] | None = None) -> str:
+    if not is_network_camera_source(source):
+        return source
+    parsed = urlparse(source)
+    if parsed.username is not None or parsed.password is not None:
+        return source  # Preserve existing private configurations.
+    if not config.username_env and not config.password_env:
+        return source
+    env = os.environ if environ is None else environ
+    username = env.get(config.username_env, "")
+    password = env.get(config.password_env, "")
+    if not config.username_env or not config.password_env or not username or not password:
+        raise CameraCredentialError("Configured camera credential environment is incomplete")
+    host = parsed.hostname or ""
+    host = f"[{host}]" if ":" in host else host
+    port = f":{parsed.port}" if parsed.port else ""
+    userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}@"
+    return urlunparse(parsed._replace(netloc=f"{userinfo}{host}{port}"))
 
 
 class LatestFrameHub:
@@ -284,7 +309,7 @@ class CameraCapture(Thread):
                 if not capture.isOpened():
                     if source.lower().startswith("rtsp://"):
                         from .rtsp_probe import probe_rtsp_source
-                        detail = probe_rtsp_source(source).detail
+                        detail = probe_rtsp_source(camera_source_with_credentials(source, self.config)).detail
                     else:
                         detail = "Kameraquelle kann nicht geöffnet werden"
                     self._mark_failure(detail)
@@ -309,7 +334,7 @@ class CameraCapture(Thread):
     def _open_capture(self, source: str) -> cv2.VideoCapture:
         # Reolink streams can require more than five seconds for the first
         # keyframe. Still bound connection attempts and read stalls separately.
-        return open_camera_source(source, timeout_ms=10000)
+        return open_camera_source(camera_source_with_credentials(source, self.config), timeout_ms=10000)
 
     def _configure_capture(self, capture: cv2.VideoCapture, source: str) -> None:
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)

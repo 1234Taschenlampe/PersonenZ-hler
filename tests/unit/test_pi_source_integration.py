@@ -22,6 +22,8 @@ def test_source_config_stores_xdg_database_path(tmp_path: Path, monkeypatch) -> 
 
 def test_mobile_api_sees_live_status_from_xdg_data_dir(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("PERSONENZAEHLER_DATA_DIR", raising=False)
+    monkeypatch.setenv("PERSONENZAEHLER_USE_XDG", "1")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     config = AppConfig()
     config.database.path = str(tmp_path / "xdg" / "personenzaehler" / "person_counter.sqlite3")
     live_file = Path(config.database.path).parent / "live_status.json"

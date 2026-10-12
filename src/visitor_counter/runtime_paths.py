@@ -114,11 +114,14 @@ class RuntimePaths:
             "true",
             "yes",
         }:
-            config_file = config_home / "personenzaehler" / "config.yaml"
-            data_dir = data_home / "personenzaehler"
-            log_dir = state_dir / "log"
-            cache_dir = cache_home / "personenzaehler"
-            license_file = config_home / "personenzaehler" / "license.json"
+            config_file = Path(env.get("PERSONENZAEHLER_CONFIG_FILE", str(config_home / "personenzaehler" / "config.yaml")))
+            data_dir = Path(env.get("PERSONENZAEHLER_DATA_DIR", str(data_home / "personenzaehler")))
+            log_dir = Path(env.get("PERSONENZAEHLER_LOG_DIR", str(state_dir / "log")))
+            cache_dir = Path(env.get("PERSONENZAEHLER_CACHE_DIR", str(cache_home / "personenzaehler")))
+            license_file = Path(env.get("PERSONENZAEHLER_LICENSE_FILE", str(config_file.parent / "license.json")))
+            user_key = config_file.parent / "license_public_key.pem"
+            if user_key.is_file() and "PERSONENZAEHLER_LICENSE_PUBLIC_KEY" not in env:
+                public_key = user_key
 
         return cls(
             project_root=root,

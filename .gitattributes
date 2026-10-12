@@ -1,0 +1,4 @@
+# Linux launchers must remain executable after checkout/archive on Windows too.
+*.sh text eol=lf
+packaging/linux/personenzaehler* text eol=lf
+packaging/debian/* text eol=lf

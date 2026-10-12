@@ -32,6 +32,8 @@ from visitor_counter.logging_setup import write_audit_event  # noqa: E402
 from visitor_counter.model_manager import ModelManager  # noqa: E402
 from visitor_counter.privacy import stream_frame_directory  # noqa: E402
 from visitor_counter.reid_manager import OSNetReIDManager  # noqa: E402
+from visitor_counter.runtime_paths import RuntimePaths  # noqa: E402
+from visitor_counter.network_readiness import wait_for_address  # noqa: E402
 
 _STATUS_CACHE_LOCK = threading.Lock()
 _STATUS_CACHE: tuple[float, dict] | None = None
@@ -42,21 +44,13 @@ ROLE_LEVEL = {"anonymous": 0, "viewer": 1, "operator": 2, "admin": 3}
 
 def _read_live_status(project_root: Path, config: AppConfig | None = None) -> dict | None:
     try:
-        configured = Path(config.database.path).expanduser() if config else None
-        fallback = (
-            configured.parent
-            if configured is not None and configured.is_absolute()
-            else project_root / "data"
-        )
-        data_dir = Path(
-            os.environ.get("PERSONENZAEHLER_DATA_DIR", str(fallback))
-        )
-        live_status_path = data_dir / "live_status.json"
+        # The pipeline writes to RuntimePaths, independently of SQLite's location.
+        live_status_path = RuntimePaths.discover(project_root).live_status_file
         if not live_status_path.exists():
             return None
         data = json.loads(live_status_path.read_text(encoding="utf-8"))
         age = time() - data.get("timestamp", 0)
-        if age > 10.0:
+        if age < 0 or age > 10.0:
             return None
         return data
     except Exception:  # noqa: BLE001
@@ -111,11 +105,7 @@ def counting_readiness(live: dict | None, config: AppConfig) -> dict:
 
 
 def build_status(project_root: Path) -> dict:
-    config_path = Path(
-        os.environ.get(
-            "PERSONENZAEHLER_CONFIG_FILE", str(project_root / "config" / "config.yaml")
-        )
-    )
+    config_path = RuntimePaths.discover(project_root).config_file
     config = load_config(config_path)
     detector = ModelManager(config.model, project_root).status()
     reid = OSNetReIDManager(config.model, project_root).status(validate_hailo=False)
@@ -926,9 +916,10 @@ def main() -> int:
     parser.add_argument("--port", type=int)
     parser.add_argument("--tls-cert", type=Path)
     parser.add_argument("--tls-key", type=Path)
+    parser.add_argument("--network-wait-seconds", type=float, default=60)
     args = parser.parse_args()
     project_root = args.project_root.resolve()
-    config_path = (args.config or project_root / "config" / "config.yaml").resolve()
+    config_path = (args.config or RuntimePaths.discover(project_root).config_file).resolve()
     os.environ["PERSONENZAEHLER_CONFIG_FILE"] = str(config_path)
     config = load_config(config_path)
     api = config.api
@@ -964,7 +955,12 @@ def main() -> int:
     StatusHandler.app_config = config
     StatusHandler.tokens = tokens
     StatusHandler.tls_enabled = bool(tls_cert and tls_key)
-    server = ThreadingHTTPServer((host, port), StatusHandler)
+    if not wait_for_address(host, timeout=args.network_wait_seconds):
+        raise SystemExit("Configured API address unavailable after network wait")
+    # HTTPServer defaults to AF_INET even for an IPv6 bind address.
+    class ConfiguredHTTPServer(ThreadingHTTPServer):
+        address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    server = ConfiguredHTTPServer((host, port), StatusHandler)
     server.daemon_threads = True
     if tls_cert and tls_key:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

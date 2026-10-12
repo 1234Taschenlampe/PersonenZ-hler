@@ -7,7 +7,7 @@ LOG_DIR="$PROJECT_DIR/logs"
 LOG_FILE="$LOG_DIR/gui_launcher.log"
 LOCK_FILE="$LOG_DIR/gui_launcher.lock"
 PID_FILE="$LOG_DIR/gui_launcher.pid"
-SECRETS_FILE="$HOME/.config/personenzaehler/api.env"
+SECRETS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/personenzaehler/api.env"
 mkdir -p "$LOG_DIR"
 
 show_error() {
@@ -44,7 +44,7 @@ start_user_service_if_available() {
   if ! systemctl --user cat visitor-counter.service >/dev/null 2>&1; then
     return 1
   fi
-  systemctl --user start visitor-counter.service >> "$LOG_FILE" 2>&1 || return 1
+  bash "$SCRIPT_DIR/desktop_session.sh" >> "$LOG_FILE" 2>&1 || return 1
   sleep 1
   raise_existing || true
   return 0

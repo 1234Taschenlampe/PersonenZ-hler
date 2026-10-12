@@ -14,6 +14,8 @@ except ImportError:  # pragma: no cover - exercised on minimal systems
 class CameraConfig:
     camera_id: str
     device: str | None = None
+    username_env: str = ""
+    password_env: str = ""
     width: int = 1280
     height: int = 720
     fps: int = 30

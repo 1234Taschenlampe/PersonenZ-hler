@@ -154,7 +154,9 @@ Hardwaretests sind mit `hardware` markiert. Emulator und Tests dürfen synthetis
 
 ## Build und CI
 
-GitHub Actions prüft Python 3.11/3.12, GUI-Smoke-Tests im Offscreen-Modus, Counter/Datenbank/API/Auth/Lizenz/Privacy-Regressionen, den Digital Twin, Python-Compile-Checks, Security-/Dependency-Audits, Secret-Pattern-Guard und reproduzierbaren DEB-Build. Große Binärdateien und HEFs werden nicht als normale Git-Dateien eingecheckt.
+GitHub Actions prüft Python 3.11/3.12/3.13, GUI-Smoke-Tests im Offscreen-Modus, Counter/Datenbank/API/Auth/Lizenz/Privacy-Regressionen, den Digital Twin, Python-Compile-Checks, Security-/Dependency-Audits, Secret-Pattern-Guard und reproduzierbaren DEB-Build. Große Binärdateien und HEFs werden nicht als normale Git-Dateien eingecheckt.
+
+Die [reproduzierbare Raspberry-Pi-Einrichtung und der Hotfix-Abgleich vom 12.10.2026](docs/PI_RUNTIME_RECOVERY_2026-10-12.md) dokumentieren Desktop-Autostart, DHCP-Recovery, TLS, sichere Sicherungen und die Grenzen der tatsächlich durchgeführten Hardwaretests.
 
 Ein AppImage ist derzeit bewusst kein Primärartefakt: HailoRT, Kernel-/Firmwareintegration, Gerätezugriffe und systemd/PolicyKit lassen sich nicht zuverlässig in ein portables Einzeldateiformat kapseln. Das DEB bleibt der unterstützte Produktionsweg.
 

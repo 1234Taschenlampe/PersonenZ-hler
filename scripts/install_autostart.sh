@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-unit_dir="$HOME/.config/systemd/user"
 config_base="${XDG_CONFIG_HOME:-$HOME/.config}"
+unit_dir="$config_base/systemd/user"
 data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
 state_base="${XDG_STATE_HOME:-$HOME/.local/state}"
 cache_base="${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -31,15 +31,16 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 WorkingDirectory=$PWD
-Environment=PYTHONPATH=$PWD/src
+Environment="PYTHONPATH=$PWD/src"
+Environment=PERSONENZAEHLER_GUI_MAXIMIZED=1
 Environment=PERSONENZAEHLER_USE_XDG=${PERSONENZAEHLER_USE_XDG:-1}
 Environment="XDG_CONFIG_HOME=$config_base"
 Environment="XDG_DATA_HOME=$data_base"
 Environment="XDG_STATE_HOME=$state_base"
 Environment="XDG_CACHE_HOME=$cache_base"
 EnvironmentFile=-$secrets
-ExecStart=$PWD/.venv/bin/python -m visitor_counter.app --project-root $PWD
-ExecStop=/usr/bin/touch $PWD/logs/visitor_counter.stop
+ExecStart="$PWD/.venv/bin/python" -m visitor_counter.app --project-root "$PWD"
+ExecStop=/usr/bin/touch "$PWD/logs/visitor_counter.stop"
 Restart=on-failure
 RestartSec=5
 KillSignal=SIGINT
@@ -69,15 +70,15 @@ StartLimitBurst=3
 [Service]
 Type=simple
 WorkingDirectory=$PWD
-Environment=PYTHONPATH=$PWD/src
+Environment="PYTHONPATH=$PWD/src"
 Environment=PERSONENZAEHLER_USE_XDG=1
 Environment="XDG_CONFIG_HOME=$config_base"
 Environment="XDG_DATA_HOME=$data_base"
 Environment="XDG_STATE_HOME=$state_base"
 Environment="XDG_CACHE_HOME=$cache_base"
 EnvironmentFile=-$secrets
-ExecCondition=$PWD/.venv/bin/python $PWD/scripts/service_preflight.py --project-root $PWD
-ExecStart=$PWD/.venv/bin/python -m visitor_counter.service --project-root $PWD
+ExecCondition="$PWD/.venv/bin/python" "$PWD/scripts/service_preflight.py" --project-root "$PWD"
+ExecStart="$PWD/.venv/bin/python" -m visitor_counter.service --project-root "$PWD"
 Restart=on-failure
 # Fatal configuration/licensing errors must not trigger restart storms.
 RestartPreventExitStatus=2 3 4
@@ -104,14 +105,15 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$PWD
-Environment=PYTHONPATH=$PWD/src
+Environment="PYTHONPATH=$PWD/src"
 Environment=PERSONENZAEHLER_USE_XDG=1
 Environment="XDG_CONFIG_HOME=$config_base"
 Environment="XDG_DATA_HOME=$data_base"
 Environment="XDG_STATE_HOME=$state_base"
 Environment="XDG_CACHE_HOME=$cache_base"
 EnvironmentFile=-$secrets
-ExecStart=$PWD/.venv/bin/python $PWD/scripts/status_api.py --project-root $PWD --config $config_file
+ExecStart="$PWD/.venv/bin/python" "$PWD/scripts/status_api.py" --project-root "$PWD" --config "$config_file"
+TimeoutStartSec=90
 Restart=on-failure
 RestartSec=8
 UMask=0077
@@ -144,7 +146,7 @@ Environment="XDG_STATE_HOME=$state_base"
 Environment="XDG_CACHE_HOME=$cache_base"
 Environment=DEBIAN_FRONTEND=noninteractive
 Environment=GIT_TERMINAL_PROMPT=0
-ExecStart=/usr/bin/python3 $PWD/scripts/auto_update.py --project-root $PWD
+ExecStart=/usr/bin/python3 "$PWD/scripts/auto_update.py" --project-root "$PWD"
 TimeoutStartSec=60min
 UMask=0077
 NoNewPrivileges=true
@@ -171,6 +173,53 @@ Unit=personenzaehler-update.service
 WantedBy=timers.target
 TIMER
 write_if_changed "$timer"
+# The timer is harmless without operator-created MAC pins. It never downloads
+# or deploys code; it only repairs unreachable, uniquely identified RTSP hosts.
+guard="$unit_dir/personenzaehler-camera-address.service"
+cat > "$guard.new" <<SERVICE
+[Unit]
+Description=PersonenZähler - pinned camera DHCP recovery
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=$PWD
+Environment=PERSONENZAEHLER_USE_XDG=1
+Environment="XDG_CONFIG_HOME=$config_base"
+Environment="XDG_DATA_HOME=$data_base"
+Environment="XDG_STATE_HOME=$state_base"
+Environment="XDG_CACHE_HOME=$cache_base"
+ExecStart="$PWD/.venv/bin/python" "$PWD/scripts/camera_address_guard.py" --project-root "$PWD" --apply
+TimeoutStartSec=150
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+SERVICE
+write_if_changed "$guard"
+guard_timer="$unit_dir/personenzaehler-camera-address.timer"
+cat > "$guard_timer.new" <<TIMER
+[Unit]
+Description=PersonenZähler - pinned camera address check
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+Unit=personenzaehler-camera-address.service
+[Install]
+WantedBy=timers.target
+TIMER
+write_if_changed "$guard_timer"
+mkdir -p "$config_base/autostart"
+autostart="$config_base/autostart/personenzaehler.desktop"
+cat > "$autostart.new" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=PersonenZähler
+Exec=/bin/bash "$PWD/scripts/desktop_session.sh"
+Terminal=false
+X-GNOME-Autostart-enabled=true
+DESKTOP
+write_if_changed "$autostart"
 if ! command -v systemctl >/dev/null 2>&1 ||
    ! systemctl --user show-environment >/dev/null 2>&1; then
   echo "WARNUNG: systemd-Benutzerbus nicht erreichbar (SSH ohne User-Session?)."
@@ -193,6 +242,12 @@ if ! systemctl --user is-enabled --quiet personenzaehler-update.timer; then
 fi
 if ! systemctl --user is-active --quiet personenzaehler-update.timer; then
   systemctl --user start personenzaehler-update.timer
+fi
+if ! systemctl --user is-enabled --quiet personenzaehler-camera-address.timer; then
+  systemctl --user enable personenzaehler-camera-address.timer
+fi
+if ! systemctl --user is-active --quiet personenzaehler-camera-address.timer; then
+  systemctl --user start personenzaehler-camera-address.timer
 fi
 if [[ -f "$config_file" && -f "$secrets" ]]; then
   if systemctl --user is-active --quiet personenzaehler-mobile-api.service; then
@@ -217,8 +272,8 @@ if [[ "${PERSONENZAEHLER_CODE_UPDATED:-0}" == 1 ]] &&
    systemctl --user is-active --quiet visitor-counter.service; then
   systemctl --user restart visitor-counter.service
 fi
-# Desktop session variables may be provided by the login manager on Wayland.
-systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1 || true
+# Do not import SSH/forwarded display variables. The XDG autostart imports the
+# real local desktop session on login, before starting the GUI.
 echo "Installierte Dienste:"
 echo "  GUI:     visitor-counter.service"
 echo "  Zählung: personenzaehler.service (über GUI starten, nach Einrichtung Autostart)"
