@@ -690,7 +690,7 @@ class ProcessingPipeline(Thread):
                 for detection in detections
                 if detection.class_id == 0 and detection.label == "person"
             ]
-            self.runtime_stats.inference_latency_ms = self.hailo.last_latency_ms
+            self.runtime_stats.inference_latency_ms = self._camera_hailo_latency_ms[packet.camera_id]
             self.runtime_stats.hailo_inference_count = self._total_engine_inferences(self._hailo_workers)
             if detections:
                 self.runtime_stats.last_detection_at = packet.captured_at

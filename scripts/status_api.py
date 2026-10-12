@@ -63,6 +63,53 @@ def _read_live_status(project_root: Path, config: AppConfig | None = None) -> di
         return None
 
 
+def counting_readiness(live: dict | None, config: AppConfig) -> dict:
+    """Readiness is distinct from API liveness: require recent real AI frames.
+
+    A single configured working camera is valid. A failed second camera yields
+    degraded operation, not a false 'all OK' or an unnecessary full outage.
+    """
+    configured = {
+        camera.camera_id for camera in config.cameras.values() if camera.device
+    }
+    def result(state: str, active: set[str], reason: str) -> dict:
+        return {
+            "ready": state in {"ready", "degraded"},
+            "state": state,
+            "reason": reason,
+            "active_camera_count": len(active),
+            "configured_camera_count": len(configured),
+        }
+
+    if not configured:
+        return result("unavailable", set(), "no_cameras_configured")
+    if not config.model.detector_enabled:
+        return result("paused", set(), "detector_disabled")
+    if not live:
+        return result("unavailable", set(), "no_fresh_live_status")
+    runtime = live.get("runtime", {})
+    if not isinstance(runtime, dict) or runtime.get("detector_active") is not True:
+        return result("unavailable", set(), "detector_inactive")
+    active: set[str] = set()
+    for camera in live.get("cameras", []):
+        if not isinstance(camera, dict) or camera.get("camera_id") not in configured:
+            continue
+        age = camera.get("seconds_since_last_ai_frame")
+        try:
+            fresh = age is not None and 0 <= float(age) < 10
+        except (TypeError, ValueError):
+            fresh = False
+        if (fresh and camera.get("status") == "ONLINE"
+                and camera.get("inference_status") == "active"
+                and camera.get("ai_processed_frames", 0) > 0):
+            active.add(camera["camera_id"])
+    if not active:
+        return result("unavailable", active, "no_recent_ai_frames")
+    if active != configured:
+        return result("degraded", active, "some_cameras_unavailable")
+    return result("ready", active, "all_cameras_processing")
+
+
 def build_status(project_root: Path) -> dict:
     config_path = Path(
         os.environ.get(
@@ -116,6 +163,7 @@ def build_status(project_root: Path) -> dict:
         "service": "visitor-counter",
         "version": _version(project_root),
         "live_data_available": live is not None,
+        "readiness": counting_readiness(live, config),
         "live_data_age_seconds": round(time() - live["timestamp"], 1) if live else None,
         "api": {
             "name": "visitor-counter-status-api",
@@ -411,6 +459,10 @@ class StatusHandler(BaseHTTPRequestHandler):
         if route in {"/status", "/api/v1/status"}:
             status = cached_status(self.project_root)
             self._send_json(200 if status["hailo"]["device_detected"] else 503, status)
+            return
+        if route == "/api/v1/readiness":
+            readiness = cached_status(self.project_root)["readiness"]
+            self._send_json(200 if readiness["ready"] else 503, readiness)
             return
         if route == "/api/v1/version":
             self._send_json(200, cached_status(self.project_root)["version"])
