@@ -206,7 +206,7 @@ class VisitorCounterService:
                 "daily_unique_degraded": counts.daily_unique_degraded,
                 "throughput": counts.throughput,
                 "wrong_way": counts.wrong_way,
-                "last_event_time": stats.last_detection_at,
+                "last_event_time": stats.last_count_event_at,
             },
             "cameras": cameras,
             "runtime": {
