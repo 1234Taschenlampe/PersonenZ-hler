@@ -22,6 +22,8 @@ class LocalCounts:
 class _TrackMemory:
     first_seen_frame: int
     last_seen_frame: int
+    # Counts processed inference updates, not possibly skipped capture frame IDs.
+    last_seen_tick: int = 0
     raw_zone_history: list[str] = field(default_factory=list)
     stable_zone: str = "neutral"
     stable_zone_history: list[str] = field(default_factory=list)
@@ -59,6 +61,7 @@ class LineCrossingCounter:
         self.camera_config = camera_config
         self.counts = LocalCounts()
         self._tracks: dict[int, _TrackMemory] = {}
+        self._processing_tick = 0
         self.rejected_events = 0
         self.last_rejection_reason = ""
         self.rejection_counts: dict[str, int] = {}
@@ -75,6 +78,7 @@ class LineCrossingCounter:
     def reset(self) -> None:
         self.counts = LocalCounts()
         self._tracks.clear()
+        self._processing_tick = 0
         self.rejected_events = 0
         self.last_rejection_reason = ""
         self.rejection_counts.clear()
@@ -90,6 +94,10 @@ class LineCrossingCounter:
         self, frame_id: int, tracks: list[TrackedObject],
         frame_size: tuple[int, int] | None = None,
     ) -> list[CrossingEvent]:
+        # The latest-frame queue intentionally drops capture frames under load.
+        # Increment once per processed camera packet so disappearance and track
+        # expiry cannot be accelerated by gaps in source frame IDs.
+        self._processing_tick += 1
         events: list[CrossingEvent] = []
         self.counts.visible = len(
             {
@@ -180,6 +188,7 @@ class LineCrossingCounter:
             memory.observed_positions.append(point)
             memory.observed_positions = memory.observed_positions[-24:]
             memory.last_seen_frame = frame_id
+            memory.last_seen_tick = self._processing_tick
             memory.observed_frames += 1
             if track.confirmed:
                 memory.last_confirmed_track = track
@@ -269,7 +278,7 @@ class LineCrossingCounter:
         # boundary. Mid-frame occlusions and temporary tracker loss never count.
         visible_ids = {track.track_id for track in tracks if track.lost_frames == 0}
         for track_id, memory in list(self._tracks.items()):
-            missing_frames = frame_id - memory.last_seen_frame
+            missing_frames = self._processing_tick - memory.last_seen_tick
             if (
                 self.camera_config.counting_mode == "exit_edge"
                 and track_id not in visible_ids
