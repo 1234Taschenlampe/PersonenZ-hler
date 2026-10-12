@@ -240,6 +240,7 @@ class RuntimeStats:
     global_visible: int = 0
     timeouts: int = 0
     last_detection_at: float | None = None
+    last_count_event_at: float | None = None
     detector_active: bool = False
     detector_error: str = ""
     camera_obstructed: dict[str, bool] = field(default_factory=dict)
