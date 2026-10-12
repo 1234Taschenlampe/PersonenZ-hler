@@ -89,6 +89,7 @@ def test_two_dedicated_hailo_contexts_run_at_the_same_time():
     pipeline._camera_hailo_latency_ms = {}
     pipeline.runtime_stats = RuntimeStats()
     pipeline._camera_ai_ticks = {}
+    pipeline._state_lock = Lock()
     with ThreadPoolExecutor(max_workers=2) as pool:
         completed = list(pool.map(pipeline._detect, (_packet("camera_1"), _packet("camera_2"))))
     assert completed == [[], []]
@@ -126,6 +127,7 @@ def test_shared_hailo_context_is_serialized_when_second_context_unavailable():
     pipeline._camera_hailo_latency_ms = {}
     pipeline.runtime_stats = RuntimeStats()
     pipeline._camera_ai_ticks = {}
+    pipeline._state_lock = Lock()
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(pipeline._detect, (_packet("camera_1"), _packet("camera_2"))))
     assert shared.max_overlap == 1
@@ -196,6 +198,7 @@ def test_secondary_hailo_runtime_error_falls_back_to_primary_context():
     pipeline._camera_hailo_latency_ms = {}
     pipeline.runtime_stats = RuntimeStats()
     pipeline._camera_ai_ticks = {}
+    pipeline._state_lock = Lock()
     assert pipeline._detect(_packet("camera_2")) == []
     assert secondary.closed
     assert pipeline._hailo_workers["camera_2"] is primary
